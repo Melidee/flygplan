@@ -64,6 +64,57 @@ impl Display for Method {
     }
 }
 
+pub struct Response {
+    pub status: Status,
+    pub headers: Headers,
+    pub body: String,
+}
+
+impl Response {
+    pub fn new(status: Status) -> Self {
+        Self {
+            status,
+            ..Default::default()
+        }
+    }
+}
+
+impl Display for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "HTTP/1.1 {}\r\n{}\r\n{}",
+            self.status, self.headers, self.body
+        )
+    }
+}
+
+impl Default for Response {
+    fn default() -> Self {
+        Self {
+            status: Status::Ok,
+            headers: Headers::default(),
+            body: String::new(),
+        }
+    }
+}
+
+pub enum Status {
+    Ok,
+    NotFound,
+}
+
+impl Display for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let method = match self {
+            Self::Ok => "200 OK",
+            Self::NotFound => "404 NOT FOUND",
+        };
+        write!(f, "{}", method)
+    }
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct Headers {
     headers: HashMap<String, String>,
 }
@@ -84,6 +135,14 @@ impl Headers {
             headers: header_map,
         })
     }
+
+    pub fn set(&mut self, header: String, value: String) {
+        self.headers.insert(header, value);
+    }
+
+    pub(crate) fn set_content_type(&mut self, value: String) {
+        self.headers.insert("Content-Type".to_string(), value);
+    }
 }
 
 impl Display for Headers {
@@ -96,4 +155,4 @@ impl Display for Headers {
             .join("\r\n");
         write!(f, "{}", formatted)
     }
-}
+} 
