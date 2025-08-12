@@ -1,24 +1,38 @@
+pub mod context;
 pub mod error;
 pub mod http;
+pub use crate::context::{Context, Handler};
 pub use crate::error::{Error, Result};
 
-use crate::http::{Request, Response};
+use crate::http::{Method, Request};
 use std::{
-    io::{Read, Write},
+    io::Read,
     net::{TcpListener, TcpStream, ToSocketAddrs},
 };
 
-pub struct Flygplan {
-    routes: Vec<(String, Handler)>,
+pub struct Flygplan<'a> {
+    routes: Vec<Route<'a>>,
+    not_found: Handler,
 }
 
-impl Flygplan {
+impl<'a> Flygplan<'a> {
     pub fn new() -> Self {
-        Self { routes: vec![] }
+        Self {
+            routes: vec![],
+            not_found: |c| c.string("404 not found"),
+        }
     }
 
-    pub fn get(&mut self, route: &str, handler: Handler) {
-        self.routes.push((route.to_string(), handler));
+    pub fn get(&mut self, pattern: &'a str, handler: Handler) {
+        self.routes.push(Route::new(Method::Get, pattern, handler));
+    }
+
+    pub fn post(&mut self, pattern: &'a str, handler: Handler) {
+        self.routes.push(Route::new(Method::Post, pattern, handler));
+    }
+
+    pub fn not_found(&mut self, handler: Handler) {
+        self.not_found = handler;
     }
 
     pub fn listen_and_serve<A: ToSocketAddrs>(self, addr: A) -> Result<()> {
@@ -35,50 +49,40 @@ impl Flygplan {
                 .map_err(|e| Error::ConnectionError(e))?;
             let raw_request = String::from_utf8(buf.to_vec()).unwrap();
             let request = Request::parse(&raw_request).unwrap();
-            println!("`{}`", request.resource);
-            for (route, handler) in self.routes.clone() {
-                if &request.resource == &route {
-                    let ctx = Context {
-                        stream,
-                        request,
-                        response: Response::default(),
-                    };
-                    handler(ctx);
-                    break;
-                }
+            Self::handle_request(self.routes.clone(), self.not_found, stream, request);
+        }
+        Ok(())
+    }
+
+    fn handle_request(routes: Vec<Route>, not_found: Handler, stream: TcpStream, request: Request) {
+        let ctx = Context::new(request, stream);
+        for route in routes {
+            if route.matches(&ctx.request) {
+                (route.handler)(ctx);
+                return;
             }
         }
-        Ok(())
+        not_found(ctx)
     }
 }
 
-type Handler = fn(Context);
-
-pub struct Context {
-    pub request: Request,
-    pub response: Response,
-    stream: TcpStream,
+#[derive(Debug, Clone)]
+struct Route<'a> {
+    method: Method,
+    pattern: &'a str,
+    handler: Handler,
 }
 
-impl Context {
-    pub fn new(request: Request, stream: TcpStream) -> Self {
+impl<'a> Route<'a> {
+    fn new(method: Method, pattern: &'a str, handler: Handler) -> Self {
         Self {
-            request,
-            response: Response::default(),
-            stream,
+            method,
+            pattern,
+            handler,
         }
     }
 
-    pub fn string(mut self, body: &str) {
-        self.response.body = body.to_string();
-        self.write().unwrap();
-    }
-
-    pub fn write(mut self) -> Result<()> {
-        let response = self.response.to_string();
-        self.stream
-            .write(response.as_bytes())
-            .map_err(|e| Error::ConnectionError(e))?;
-        Ok(())
+    fn matches(&self, request: &Request) -> bool {
+        return self.method == request.method && self.pattern == request.resource;
     }
 }

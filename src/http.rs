@@ -37,6 +37,7 @@ impl Display for Request {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Method {
     Get,
     Post,
@@ -138,10 +139,6 @@ impl Headers {
 
     pub fn set(&mut self, header: String, value: String) {
         self.headers.insert(header, value);
-    }
-
-    pub(crate) fn set_content_type(&mut self, value: String) {
-        self.headers.insert("Content-Type".to_string(), value);
     }
 }
 
