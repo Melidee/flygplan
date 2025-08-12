@@ -70,12 +70,11 @@ impl Context {
     }
 
     pub fn string(mut self, body: &str) {
-        self.response.headers.set_content_type("text".to_string());
         self.response.body = body.to_string();
-        self.finalize().unwrap();
+        self.write().unwrap();
     }
 
-    pub fn finalize(mut self) -> Result<()> {
+    pub fn write(mut self) -> Result<()> {
         let response = self.response.to_string();
         self.stream
             .write(response.as_bytes())
