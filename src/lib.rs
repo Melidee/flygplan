@@ -17,10 +17,7 @@ pub struct Flygplan<'a> {
 
 impl<'a> Flygplan<'a> {
     pub fn new() -> Self {
-        Self {
-            routes: vec![],
-            not_found: |c| c.string("404 not found"),
-        }
+        Self { routes: vec![], not_found: |c| c.string("404 not found") }
     }
 
     pub fn get(&mut self, pattern: &'a str, handler: Handler) {

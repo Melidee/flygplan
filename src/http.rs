@@ -1,18 +1,18 @@
 use std::{collections::HashMap, fmt::Display};
 
-pub struct Request {
+pub struct Request<'a> {
     pub method: Method,
-    pub resource: String,
-    pub headers: Headers,
+    pub resource: &'a str,
+    pub headers: Headers<'a>,
     pub body: String,
 }
 
-impl Request {
-    pub fn parse(from: &str) -> Option<Self> {
+impl<'a> Request<'a> {
+    pub fn parse(from: &'a str) -> Option<Self> {
         let mut lines = from.split("\r\n");
         let mut parts = lines.next()?.split(" ");
         let method = parts.next()?.try_into().ok()?;
-        let resource = parts.next()?.to_string();
+        let resource = parts.next()?;
         if parts.count() != 1 {
             return None;
         }
@@ -25,9 +25,14 @@ impl Request {
             body,
         })
     }
+
+    pub fn set_header(&mut self, header: &'a str, value: &'a str) -> &mut Self {
+        self.headers.set(header, value);
+        self
+    }
 }
 
-impl Display for Request {
+impl<'a> Display for Request<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -65,13 +70,13 @@ impl Display for Method {
     }
 }
 
-pub struct Response {
+pub struct Response<'a> {
     pub status: Status,
-    pub headers: Headers,
+    pub headers: Headers<'a>,
     pub body: String,
 }
 
-impl Response {
+impl<'a> Response<'a> {
     pub fn new(status: Status) -> Self {
         Self {
             status,
@@ -80,7 +85,7 @@ impl Response {
     }
 }
 
-impl Display for Response {
+impl<'a> Display for Response<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -90,7 +95,7 @@ impl Display for Response {
     }
 }
 
-impl Default for Response {
+impl<'a> Default for Response<'a> {
     fn default() -> Self {
         Self {
             status: Status::Ok,
@@ -100,6 +105,7 @@ impl Default for Response {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Status {
     Ok,
     NotFound,
@@ -116,20 +122,20 @@ impl Display for Status {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct Headers {
-    headers: HashMap<String, String>,
+pub struct Headers<'a> {
+    headers: HashMap<&'a str, &'a str>,
 }
 
-impl Headers {
-    fn from_lines<'a>(lines: &mut impl Iterator<Item = &'a str>) -> Option<Self> {
+impl<'a> Headers<'a> {
+    fn from_lines<'b: 'a>(lines: &mut impl Iterator<Item = &'b str>) -> Option<Self> {
         let mut header_map = HashMap::new();
         for line in lines {
             if line.is_empty() {
                 break;
             }
             let mut parts = line.split(": ");
-            let header = parts.next()?.to_string();
-            let value = parts.next()?.to_string();
+            let header = parts.next()?;
+            let value = parts.next()?;
             header_map.insert(header, value);
         }
         Some(Self {
@@ -137,12 +143,12 @@ impl Headers {
         })
     }
 
-    pub fn set(&mut self, header: String, value: String) {
+    pub fn set(&mut self, header: &'a str, value: &'a str) {
         self.headers.insert(header, value);
     }
 }
 
-impl Display for Headers {
+impl<'a> Display for Headers<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let formatted = self
             .headers

@@ -6,14 +6,14 @@ use crate::http::{Request, Response};
 
 pub type Handler = fn(Context);
 
-pub struct Context {
-    pub request: Request,
-    pub response: Response,
+pub struct Context<'a> {
+    pub request: Request<'a>,
+    pub response: Response<'a>,
     stream: TcpStream,
 }
 
-impl Context {
-    pub fn new(request: Request, stream: TcpStream) -> Self {
+impl<'a> Context<'a> {
+    pub fn new(request: Request<'a>, stream: TcpStream) -> Self {
         Self {
             request,
             response: Response::default(),
