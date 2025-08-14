@@ -4,7 +4,9 @@ pub mod http;
 pub use crate::context::{Context, Handler};
 pub use crate::error::{Error, Result};
 
-use crate::http::{Method, Request};
+use crate::http::{Method, Request, Status};
+use std::sync::Arc;
+use std::vec;
 use std::{
     io::Read,
     net::{TcpListener, TcpStream, ToSocketAddrs},
@@ -12,24 +14,27 @@ use std::{
 
 pub struct Flygplan<'a> {
     routes: Vec<Route<'a>>,
-    not_found: Handler,
+    status_handlers: Vec<(Status, Handler)>,
 }
 
 impl<'a> Flygplan<'a> {
     pub fn new() -> Self {
-        Self { routes: vec![], not_found: |c| c.string("404 not found") }
+        Self {
+            routes: vec![],
+            status_handlers: vec![],
+        }
     }
 
-    pub fn get(&mut self, pattern: &'a str, handler: Handler) {
-        self.routes.push(Route::new(Method::Get, pattern, handler));
+    pub fn get<F: Fn(Context) + 'static>(&mut self, pattern: &'a str, handler: F) {
+        self.routes.push(Route::new(Method::Get, pattern, Arc::new(handler)));
     }
 
-    pub fn post(&mut self, pattern: &'a str, handler: Handler) {
-        self.routes.push(Route::new(Method::Post, pattern, handler));
+    pub fn post<F: Fn(Context) + 'static>(&mut self, pattern: &'a str, handler: F) {
+        self.routes.push(Route::new(Method::Post, pattern, Arc::new(handler)));
     }
 
-    pub fn not_found(&mut self, handler: Handler) {
-        self.not_found = handler;
+    pub fn status_handler<F: Fn(Context) + 'static>(&mut self, status: Status, handler: F) {
+        self.status_handlers.push((status, Arc::new(handler)));
     }
 
     pub fn listen_and_serve<A: ToSocketAddrs>(self, addr: A) -> Result<()> {
@@ -46,24 +51,29 @@ impl<'a> Flygplan<'a> {
                 .map_err(|e| Error::ConnectionError(e))?;
             let raw_request = String::from_utf8(buf.to_vec()).unwrap();
             let request = Request::parse(&raw_request).unwrap();
-            Self::handle_request(self.routes.clone(), self.not_found, stream, request);
+            Self::handle_request(self.routes.clone(), &self.status_handlers, stream, request);
         }
         Ok(())
     }
 
-    fn handle_request(routes: Vec<Route>, not_found: Handler, stream: TcpStream, request: Request) {
-        let ctx = Context::new(request, stream);
+    fn handle_request(
+        routes: Vec<Route>,
+        status_handlers: &Vec<(Status, Handler)>,
+        stream: TcpStream,
+        request: Request,
+    ) {
+        let ctx = Context::new(request, status_handlers, stream);
         for route in routes {
             if route.matches(&ctx.request) {
                 (route.handler)(ctx);
                 return;
             }
         }
-        not_found(ctx)
+        ctx.status(Status::NotFound).unwrap();
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct Route<'a> {
     method: Method,
     pattern: &'a str,
