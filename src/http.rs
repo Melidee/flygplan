@@ -4,7 +4,7 @@ use std::{fmt::Display, vec};
 #[derive(Debug, Clone)]
 pub struct Request<'a> {
     pub method: Method,
-    pub resource: &'a str,
+    pub resource: Url<'a>,
     pub headers: Headers<'a>,
     pub body: &'a [u8],
 }
@@ -18,7 +18,8 @@ impl<'a> Request<'a> {
         {
             let method_str = str::from_utf8(method_bytes).map_err(|_| Error::ParseError)?;
             let method = Method::try_from(method_str)?;
-            let resource = str::from_utf8(resource_bytes).map_err(|_| Error::ParseError)?;
+            let resource_str = str::from_utf8(resource_bytes).map_err(|_| Error::ParseError)?;
+            let resource = Url::parse(resource_str).ok_or(Error::ParseError)?;
             (method, resource)
         } else {
             return Err(Error::ParseError);
@@ -257,6 +258,32 @@ impl<'a> Url<'a> {
     }
 }
 
+impl<'a> Display for Url<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{}{}{}{}{}{}{}{}{}{}{}{}",
+            self.scheme,
+            if !self.scheme.is_empty() { "://" } else { "" },
+            self.username,
+            if !self.password.is_empty() { ":" } else { "" },
+            self.password,
+            if !self.username.is_empty() { "@" } else { "" },
+            self.host,
+            if self.port != 0 { format!(":{}", self.port) } else { "".to_string() },
+            self.path,
+            if !self.query.is_empty() { "?" } else { "" },
+            self.query
+                .iter()
+                .map(|(key, val)| format!("{}={}", key, val))
+                .collect::<Vec<_>>()
+                .join("&"),
+            if !self.fragment.is_empty() { "#" } else { "" },
+            self.fragment
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,5 +323,22 @@ mod tests {
             fragment: "fragid",
         };
         assert_eq!(parsed, expected)
+    }
+
+    #[test]
+    fn format_full_url() {
+        let url = Url {
+            scheme: "",
+            username: "",
+            password: "",
+            host: "",
+            port: 0,
+            path: "/path/data",
+            query: vec![("key", "value")],
+            fragment: "fragid",
+        };
+        let formatted = &url.to_string();
+        let expected = "/path/data?key=value#fragid";
+        assert_eq!(formatted, expected)
     }
 }

@@ -91,6 +91,6 @@ impl<'a> Route<'a> {
     }
 
     fn matches(&self, request: &Request) -> bool {
-        return self.method == request.method && self.pattern == request.resource;
+        return self.method == request.method && self.pattern == request.resource.path;
     }
 }
