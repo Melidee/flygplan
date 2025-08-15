@@ -20,6 +20,7 @@ impl<'a> Request<'a> {
             let method = Method::try_from(method_str)?;
             let resource_str = str::from_utf8(resource_bytes).map_err(|_| Error::ParseError)?;
             let resource = Url::parse(resource_str).ok_or(Error::ParseError)?;
+
             (method, resource)
         } else {
             return Err(Error::ParseError);
@@ -222,7 +223,7 @@ pub struct Url<'a> {
     pub host: &'a str,
     pub port: u16,
     pub path: &'a str,
-    pub query: Vec<(&'a str, &'a str)>,
+    pub query_params: QueryParams<'a>,
     pub fragment: &'a str,
 }
 
@@ -236,15 +237,11 @@ impl<'a> Url<'a> {
         (url.scheme, value) = value.split_once("://").unwrap_or(("", value));
         let userpair;
         (userpair, value) = value.split_once("@").unwrap_or(("", value));
-        println!("{}", userpair);
         (url.username, url.password) = userpair.split_once(":").unwrap_or((userpair, ""));
         (value, url.fragment) = value.split_once("#").unwrap_or((value, ""));
         let query;
         (value, query) = value.split_once("?").unwrap_or((value, ""));
-        url.query = query
-            .split("&")
-            .map(|pair| pair.split_once("="))
-            .collect::<Option<Vec<_>>>()?;
+        url.query_params = QueryParams::parse(query).unwrap_or_default();
         let hostpair;
         (hostpair, url.path) = value
             .find("/")
@@ -262,7 +259,7 @@ impl<'a> Display for Url<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}{}{}{}{}{}{}{}{}{}{}{}{}",
+            "{}{}{}{}{}{}{}{}{}{}{}{}",
             self.scheme,
             if !self.scheme.is_empty() { "://" } else { "" },
             self.username,
@@ -270,16 +267,59 @@ impl<'a> Display for Url<'a> {
             self.password,
             if !self.username.is_empty() { "@" } else { "" },
             self.host,
-            if self.port != 0 { format!(":{}", self.port) } else { "".to_string() },
+            if self.port != 0 {
+                format!(":{}", self.port)
+            } else {
+                "".to_string()
+            },
             self.path,
-            if !self.query.is_empty() { "?" } else { "" },
-            self.query
+            self.query_params,
+            if !self.fragment.is_empty() { "#" } else { "" },
+            self.fragment
+        )
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct QueryParams<'a> {
+    params: Vec<(&'a str, &'a str)>,
+}
+
+impl<'a> QueryParams<'a> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn get(&self, key: &'a str) -> Option<String> {
+        self.params
+            .iter()
+            .filter(|(k, _v)| &key == k)
+            .next()
+            .map(|(_k, v)| v.to_string())
+    }
+
+    pub fn parse(query: &'a str) -> Option<Self> {
+        let params = query
+            .split("&")
+            .map(|pair| pair.split_once("="))
+            .collect::<Option<Vec<_>>>()?;
+        Some(Self { params })
+    }
+}
+
+impl<'a> Display for QueryParams<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.params.is_empty() {
+            return write!(f, "");
+        }
+        write!(
+            f,
+            "?{}",
+            self.params
                 .iter()
                 .map(|(key, val)| format!("{}={}", key, val))
                 .collect::<Vec<_>>()
                 .join("&"),
-            if !self.fragment.is_empty() { "#" } else { "" },
-            self.fragment
         )
     }
 }
@@ -302,7 +342,9 @@ mod tests {
             host: "example.com",
             port: 123,
             path: "/path/data",
-            query: vec![("key", "value")],
+            query_params: QueryParams {
+                params: vec![("key", "value")],
+            },
             fragment: "fragid",
         };
         assert_eq!(parsed, expected)
@@ -319,8 +361,27 @@ mod tests {
             host: "",
             port: 0,
             path: "/path/data",
-            query: vec![("key", "value")],
+            query_params: QueryParams {
+                params: vec![("key", "value")],
+            },
             fragment: "fragid",
+        };
+        assert_eq!(parsed, expected)
+    }
+
+    #[test]
+    fn parse_path_only() {
+        let url = "/ameliaa";
+        let parsed = Url::parse(url).unwrap();
+        let expected = Url {
+            scheme: "",
+            username: "",
+            password: "",
+            host: "",
+            port: 0,
+            path: "/ameliaa",
+            query_params: QueryParams::new(),
+            fragment: "",
         };
         assert_eq!(parsed, expected)
     }
@@ -334,7 +395,9 @@ mod tests {
             host: "",
             port: 0,
             path: "/path/data",
-            query: vec![("key", "value")],
+            query_params: QueryParams {
+                params: vec![("key", "value")],
+            },
             fragment: "fragid",
         };
         let formatted = &url.to_string();

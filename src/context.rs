@@ -3,7 +3,7 @@ use std::net::TcpStream;
 use std::sync::Arc;
 
 use crate::error::{Error, Result};
-use crate::http::{Request, Response, Status};
+use crate::http::{QueryParams, Request, Response, Status};
 
 pub type Handler = Arc<dyn Fn(Context)>;
 
@@ -26,6 +26,10 @@ impl<'a> Context<'a> {
             status_handlers,
             stream,
         }
+    }
+
+    pub fn query_params(&self) -> &QueryParams {
+        &self.request.resource.query_params
     }
 
     pub fn string(mut self, body: &str) {
