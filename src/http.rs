@@ -1,24 +1,32 @@
-use std::{collections::HashMap, fmt::Display};
+use crate::{Error, error::Result};
+use std::{fmt::Display, vec};
 
 pub struct Request<'a> {
     pub method: Method,
     pub resource: &'a str,
     pub headers: Headers<'a>,
-    pub body: String,
+    pub body: &'a [u8],
 }
 
 impl<'a> Request<'a> {
-    pub fn parse(from: &'a str) -> Option<Self> {
-        let mut lines = from.split("\r\n");
-        let mut parts = lines.next()?.split(" ");
-        let method = parts.next()?.try_into().ok()?;
-        let resource = parts.next()?;
-        if parts.count() != 1 {
-            return None;
-        }
-        let headers = Headers::from_lines(&mut lines)?;
-        let body = lines.collect::<Vec<&str>>().join("\r\n");
-        Some(Self {
+    pub fn parse(from: &'a [u8]) -> Result<Self> {
+        let (first_line, rest) =
+            split_slice_once(from, "\r\n".as_bytes()).ok_or(Error::ParseError)?;
+        let (method, resource) = if let [method_bytes, resource_bytes, b"HTTP/1.1"] =
+            split_slice(first_line, &[b' ']).as_slice()
+        {
+            let method_str = str::from_utf8(method_bytes).map_err(|_| Error::ParseError)?;
+            let method = Method::try_from(method_str)?;
+            let resource = str::from_utf8(resource_bytes).map_err(|_| Error::ParseError)?;
+            (method, resource)
+        } else {
+            return Err(Error::ParseError);
+        };
+        let (headers_block, body) =
+            split_slice_once(rest, "\r\n\r\n".as_bytes()).ok_or(Error::ParseError)?;
+        let headers_str = str::from_utf8(headers_block).map_err(|_| Error::ParseError)?;
+        let headers = Headers::from_lines(&mut headers_str.lines()).ok_or(Error::ParseError)?;
+        Ok(Self {
             method,
             resource,
             headers,
@@ -37,7 +45,10 @@ impl<'a> Display for Request<'a> {
         write!(
             f,
             "{} {} HTTP/1.1\r\n{}\r\n{}",
-            self.method, self.resource, self.headers, self.body
+            self.method,
+            self.resource,
+            self.headers,
+            String::from_utf8_lossy(self.body)
         )
     }
 }
@@ -49,22 +60,22 @@ pub enum Method {
 }
 
 impl TryFrom<&str> for Method {
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+    fn try_from(value: &str) -> std::result::Result<Self, Self::Error> {
         Ok(match value {
             "GET" => Self::Get,
             "POST" => Self::Post,
-            _ => return Err(()),
+            _ => return Err(Error::ParseError),
         })
     }
 
-    type Error = ();
+    type Error = Error;
 }
 
 impl Display for Method {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let method = match self {
             Method::Get => "GET",
-            Method::Post => "GET",
+            Method::Post => "POST",
         };
         write!(f, "{}", method)
     }
@@ -98,7 +109,7 @@ impl<'a> Display for Response<'a> {
 impl<'a> Default for Response<'a> {
     fn default() -> Self {
         Self {
-            status: Status::Ok,
+            status: Status::Ok200,
             headers: Headers::default(),
             body: String::new(),
         }
@@ -107,28 +118,67 @@ impl<'a> Default for Response<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Status {
-    Ok,
-    NotFound,
+    Ok200,
+    NotFound404,
 }
 
 impl Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let method = match self {
-            Self::Ok => "200 OK",
-            Self::NotFound => "404 NOT FOUND",
+            Self::Ok200 => "200 OK",
+            Self::NotFound404 => "404 NOT FOUND",
         };
         write!(f, "{}", method)
     }
 }
 
+fn split_slice<'a>(haystack: &'a [u8], needle: &'a [u8]) -> Vec<&'a [u8]> {
+    let mut splits = vec![];
+    let mut i = 0;
+    let mut last_start = 0;
+    while i < haystack.len() - needle.len() {
+        let selection = if let Some(selection) = haystack.get(i..i + needle.len()) {
+            selection
+        } else {
+            break;
+        };
+        if selection == needle {
+            splits.push(&haystack[last_start..i]);
+            i += needle.len();
+            last_start = i;
+        }
+        i += 1;
+    }
+    splits.push(&haystack[last_start..]);
+    return splits;
+}
+
+fn split_slice_once<'a>(haystack: &'a [u8], needle: &'a [u8]) -> Option<(&'a [u8], &'a [u8])> {
+    for i in 0..(haystack.len() - needle.len()) {
+        let selection = if let Some(selection) = haystack.get(i..i + needle.len()) {
+            selection
+        } else {
+            break;
+        };
+        if selection == needle {
+            return Some((&haystack[0..i], &haystack[i + needle.len()..]));
+        }
+    }
+    return None;
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Headers<'a> {
-    headers: HashMap<&'a str, &'a str>,
+    headers: Vec<(&'a str, &'a str)>,
 }
 
 impl<'a> Headers<'a> {
+    pub fn new() -> Self {
+        Headers { headers: vec![] }
+    }
+
     fn from_lines<'b: 'a>(lines: &mut impl Iterator<Item = &'b str>) -> Option<Self> {
-        let mut header_map = HashMap::new();
+        let mut header_map = vec![];
         for line in lines {
             if line.is_empty() {
                 break;
@@ -136,7 +186,7 @@ impl<'a> Headers<'a> {
             let mut parts = line.split(": ");
             let header = parts.next()?;
             let value = parts.next()?;
-            header_map.insert(header, value);
+            header_map.push((header, value));
         }
         Some(Self {
             headers: header_map,
@@ -144,7 +194,7 @@ impl<'a> Headers<'a> {
     }
 
     pub fn set(&mut self, header: &'a str, value: &'a str) {
-        self.headers.insert(header, value);
+        self.headers.push((header, value));
     }
 }
 
@@ -158,4 +208,4 @@ impl<'a> Display for Headers<'a> {
             .join("\r\n");
         write!(f, "{}", formatted)
     }
-} 
+}

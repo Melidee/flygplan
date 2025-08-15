@@ -26,11 +26,13 @@ impl<'a> Flygplan<'a> {
     }
 
     pub fn get<F: Fn(Context) + 'static>(&mut self, pattern: &'a str, handler: F) {
-        self.routes.push(Route::new(Method::Get, pattern, Arc::new(handler)));
+        self.routes
+            .push(Route::new(Method::Get, pattern, Arc::new(handler)));
     }
 
     pub fn post<F: Fn(Context) + 'static>(&mut self, pattern: &'a str, handler: F) {
-        self.routes.push(Route::new(Method::Post, pattern, Arc::new(handler)));
+        self.routes
+            .push(Route::new(Method::Post, pattern, Arc::new(handler)));
     }
 
     pub fn status_handler<F: Fn(Context) + 'static>(&mut self, status: Status, handler: F) {
@@ -49,8 +51,7 @@ impl<'a> Flygplan<'a> {
             stream
                 .read(&mut buf)
                 .map_err(|e| Error::ConnectionError(e))?;
-            let raw_request = String::from_utf8(buf.to_vec()).unwrap();
-            let request = Request::parse(&raw_request).unwrap();
+            let request = Request::parse(&buf).unwrap();
             Self::handle_request(self.routes.clone(), &self.status_handlers, stream, request);
         }
         Ok(())
@@ -69,7 +70,7 @@ impl<'a> Flygplan<'a> {
                 return;
             }
         }
-        ctx.status(Status::NotFound).unwrap();
+        ctx.status(Status::NotFound404).unwrap();
     }
 }
 
