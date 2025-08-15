@@ -1,6 +1,7 @@
 use crate::{Error, error::Result};
 use std::{fmt::Display, vec};
 
+#[derive(Debug, Clone)]
 pub struct Request<'a> {
     pub method: Method,
     pub resource: &'a str,
@@ -25,7 +26,9 @@ impl<'a> Request<'a> {
         let (headers_block, body) =
             split_slice_once(rest, "\r\n\r\n".as_bytes()).ok_or(Error::ParseError)?;
         let headers_str = str::from_utf8(headers_block).map_err(|_| Error::ParseError)?;
+
         let headers = Headers::from_lines(&mut headers_str.lines()).ok_or(Error::ParseError)?;
+
         Ok(Self {
             method,
             resource,
@@ -207,5 +210,91 @@ impl<'a> Display for Headers<'a> {
             .collect::<Vec<String>>()
             .join("\r\n");
         write!(f, "{}", formatted)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Url<'a> {
+    pub scheme: &'a str,
+    pub username: &'a str,
+    pub password: &'a str,
+    pub host: &'a str,
+    pub port: u16,
+    pub path: &'a str,
+    pub query: Vec<(&'a str, &'a str)>,
+    pub fragment: &'a str,
+}
+
+impl<'a> Url<'a> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn parse(mut value: &'a str) -> Option<Self> {
+        let mut url = Url::default();
+        (url.scheme, value) = value.split_once("://").unwrap_or(("", value));
+        let userpair;
+        (userpair, value) = value.split_once("@").unwrap_or(("", value));
+        println!("{}", userpair);
+        (url.username, url.password) = userpair.split_once(":").unwrap_or((userpair, ""));
+        (value, url.fragment) = value.split_once("#").unwrap_or((value, ""));
+        let query;
+        (value, query) = value.split_once("?").unwrap_or((value, ""));
+        url.query = query
+            .split("&")
+            .map(|pair| pair.split_once("="))
+            .collect::<Option<Vec<_>>>()?;
+        let hostpair;
+        (hostpair, url.path) = value
+            .find("/")
+            .map(|idx| value.split_at(idx))
+            .unwrap_or((value, ""));
+        (url.host, url.port) = hostpair
+            .split_once(":")
+            .map(|(host, port)| (host, port.parse().unwrap_or(0)))
+            .unwrap_or((hostpair, 0u16));
+        Some(url)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_line_request() {}
+
+    #[test]
+    fn parse_full_url() {
+        let url = "abc://username:password@example.com:123/path/data?key=value#fragid";
+        let parsed = Url::parse(url).unwrap();
+        let expected = Url {
+            scheme: "abc",
+            username: "username",
+            password: "password",
+            host: "example.com",
+            port: 123,
+            path: "/path/data",
+            query: vec![("key", "value")],
+            fragment: "fragid",
+        };
+        assert_eq!(parsed, expected)
+    }
+
+    #[test]
+    fn parse_path_query_frag_url() {
+        let url = "/path/data?key=value#fragid";
+        let parsed = Url::parse(url).unwrap();
+        let expected = Url {
+            scheme: "",
+            username: "",
+            password: "",
+            host: "",
+            port: 0,
+            path: "/path/data",
+            query: vec![("key", "value")],
+            fragment: "fragid",
+        };
+        assert_eq!(parsed, expected)
     }
 }
