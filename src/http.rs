@@ -223,7 +223,7 @@ pub struct Url<'a> {
     pub host: &'a str,
     pub port: u16,
     pub path: &'a str,
-    pub query_params: QueryParams<'a>,
+    pub query_params: Params<'a>,
     pub fragment: &'a str,
 }
 
@@ -241,7 +241,7 @@ impl<'a> Url<'a> {
         (value, url.fragment) = value.split_once("#").unwrap_or((value, ""));
         let query;
         (value, query) = value.split_once("?").unwrap_or((value, ""));
-        url.query_params = QueryParams::parse(query).unwrap_or_default();
+        url.query_params = Params::parse_query_params(query).unwrap_or_default();
         let hostpair;
         (hostpair, url.path) = value
             .find("/")
@@ -281,13 +281,17 @@ impl<'a> Display for Url<'a> {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct QueryParams<'a> {
+pub struct Params<'a> {
     params: Vec<(&'a str, &'a str)>,
 }
 
-impl<'a> QueryParams<'a> {
+impl<'a> Params<'a> {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn push(&mut self, pair: (&'a str, &'a str)) {
+        self.params.push(pair);
     }
 
     pub fn get(&self, key: &'a str) -> Option<String> {
@@ -298,7 +302,7 @@ impl<'a> QueryParams<'a> {
             .map(|(_k, v)| v.to_string())
     }
 
-    pub fn parse(query: &'a str) -> Option<Self> {
+    pub fn parse_query_params(query: &'a str) -> Option<Self> {
         let params = query
             .split("&")
             .map(|pair| pair.split_once("="))
@@ -307,7 +311,7 @@ impl<'a> QueryParams<'a> {
     }
 }
 
-impl<'a> Display for QueryParams<'a> {
+impl<'a> Display for Params<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.params.is_empty() {
             return write!(f, "");
@@ -342,7 +346,7 @@ mod tests {
             host: "example.com",
             port: 123,
             path: "/path/data",
-            query_params: QueryParams {
+            query_params: Params {
                 params: vec![("key", "value")],
             },
             fragment: "fragid",
@@ -361,7 +365,7 @@ mod tests {
             host: "",
             port: 0,
             path: "/path/data",
-            query_params: QueryParams {
+            query_params: Params {
                 params: vec![("key", "value")],
             },
             fragment: "fragid",
@@ -380,7 +384,7 @@ mod tests {
             host: "",
             port: 0,
             path: "/ameliaa",
-            query_params: QueryParams::new(),
+            query_params: Params::new(),
             fragment: "",
         };
         assert_eq!(parsed, expected)
@@ -395,7 +399,7 @@ mod tests {
             host: "",
             port: 0,
             path: "/path/data",
-            query_params: QueryParams {
+            query_params: Params {
                 params: vec![("key", "value")],
             },
             fragment: "fragid",

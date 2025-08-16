@@ -3,13 +3,14 @@ use std::net::TcpStream;
 use std::sync::Arc;
 
 use crate::error::{Error, Result};
-use crate::http::{QueryParams, Request, Response, Status};
+use crate::http::{Params, Request, Response, Status};
 
 pub type Handler = Arc<dyn Fn(Context)>;
 
 pub struct Context<'a> {
     pub request: Request<'a>,
     pub response: Response<'a>,
+    url_params: Params<'a>,
     status_handlers: &'a Vec<(Status, Handler)>,
     stream: TcpStream,
 }
@@ -17,18 +18,24 @@ pub struct Context<'a> {
 impl<'a> Context<'a> {
     pub fn new(
         request: Request<'a>,
+        url_params: Params<'a>,
         status_handlers: &'a Vec<(Status, Handler)>,
         stream: TcpStream,
     ) -> Self {
         Self {
             request,
             response: Response::default(),
+            url_params,
             status_handlers,
             stream,
         }
     }
 
-    pub fn query_params(&self) -> &QueryParams {
+    pub fn url_param(&self, key: &str) -> Option<String> {
+        self.url_params.get(key)
+    }
+
+    pub fn query_params(&self) -> &Params {
         &self.request.resource.query_params
     }
 

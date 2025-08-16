@@ -4,7 +4,7 @@ pub mod http;
 pub use crate::context::{Context, Handler};
 pub use crate::error::{Error, Result};
 
-use crate::http::{Method, Request, Status};
+use crate::http::{Method, Params, Request, Status};
 use std::sync::Arc;
 use std::vec;
 use std::{
@@ -63,14 +63,16 @@ impl<'a> Flygplan<'a> {
         stream: TcpStream,
         request: Request,
     ) {
-        let ctx = Context::new(request, status_handlers, stream);
         for route in routes {
-            if route.matches(&ctx.request) {
+            if let Some(url_params) = route.matches(&request) {
+                let ctx = Context::new(request.clone(), url_params, status_handlers, stream);
                 (route.handler)(ctx);
                 return;
             }
         }
-        ctx.status(Status::NotFound404).unwrap();
+        Context::new(request, Params::default(), status_handlers, stream)
+            .status(Status::NotFound404)
+            .unwrap();
     }
 }
 
@@ -90,7 +92,27 @@ impl<'a> Route<'a> {
         }
     }
 
-    fn matches(&self, request: &Request) -> bool {
-        return self.method == request.method && self.pattern == request.resource.path;
+    fn matches(&self, request: &'a Request) -> Option<Params<'a>> {
+        if request.method != self.method {
+            return None;
+        }
+        let mut params: Params<'_> = Params::new();
+        let pattern_segments = self.pattern.split("/").collect::<Vec<_>>();
+        let request_segments = request.resource.path.split("/").collect::<Vec<_>>();
+        if pattern_segments.len() != request_segments.len() {
+            return None;
+        }
+        for (pattern_seg, request_seg) in pattern_segments.iter().zip(request_segments.iter()) {
+            let segment_is_dynamic = pattern_seg.chars().next() == Some('{')
+                && pattern_seg.chars().next_back() == Some('}');
+            if segment_is_dynamic {
+                params.push((&pattern_seg[1..pattern_seg.len()-1], request_seg.to_owned()));
+                continue;
+            }
+            if pattern_seg != request_seg {
+                return None;
+            }
+        }
+        Some(params)
     }
 }
