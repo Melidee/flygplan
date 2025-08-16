@@ -1,7 +1,7 @@
 use crate::{Error, error::Result};
-use std::{fmt::Display, vec};
+use std::{fmt::Display, io, vec};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Request<'a> {
     pub method: Method,
     pub resource: Url<'a>,
@@ -10,6 +10,35 @@ pub struct Request<'a> {
 }
 
 impl<'a> Request<'a> {
+    pub fn parse(from: &'a [u8]) -> Result<Self> {
+        let (request_parts, body) =
+            split_slice_once(from, "\r\n\r\n".as_bytes()).ok_or(Error::ParseError)?;
+        let (first_line, header_str) = str::from_utf8(request_parts)
+            .map_err(|_| Error::ParseError)?
+            .split_once("\r\n")
+            .ok_or(Error::ParseError)?;
+        let mut splits = first_line.split(" ");
+        let method = splits
+            .next()
+            .map(|method| Method::try_from(method).ok())
+            .flatten()
+            .ok_or(Error::ParseError)?;
+        let resource = splits
+            .next()
+            .map(|url| Url::parse(url))
+            .flatten()
+            .ok_or(Error::ParseError)?;
+        let headers =
+            Headers::from_lines(&mut header_str.split("\r\n")).ok_or(Error::ParseError)?;
+        Ok(Self {
+            method,
+            resource,
+            headers,
+            body,
+        })
+    }
+
+    /*
     pub fn parse(from: &'a [u8]) -> Result<Self> {
         let (first_line, rest) =
             split_slice_once(from, "\r\n".as_bytes()).ok_or(Error::ParseError)?;
@@ -38,11 +67,27 @@ impl<'a> Request<'a> {
             body,
         })
     }
+    */
 
     pub fn set_header(&mut self, header: &'a str, value: &'a str) -> &mut Self {
         self.headers.set(header, value);
         self
     }
+}
+
+// used in HTTP request parsing
+fn split_slice_once<'a>(haystack: &'a [u8], needle: &'a [u8]) -> Option<(&'a [u8], &'a [u8])> {
+    for i in 0..(haystack.len() - needle.len()) {
+        let selection = if let Some(selection) = haystack.get(i..i + needle.len()) {
+            selection
+        } else {
+            break;
+        };
+        if selection == needle {
+            return Some((&haystack[0..i], &haystack[i + needle.len()..]));
+        }
+    }
+    return None;
 }
 
 impl<'a> Display for Request<'a> {
@@ -137,42 +182,7 @@ impl Display for Status {
     }
 }
 
-fn split_slice<'a>(haystack: &'a [u8], needle: &'a [u8]) -> Vec<&'a [u8]> {
-    let mut splits = vec![];
-    let mut i = 0;
-    let mut last_start = 0;
-    while i < haystack.len() - needle.len() {
-        let selection = if let Some(selection) = haystack.get(i..i + needle.len()) {
-            selection
-        } else {
-            break;
-        };
-        if selection == needle {
-            splits.push(&haystack[last_start..i]);
-            i += needle.len();
-            last_start = i;
-        }
-        i += 1;
-    }
-    splits.push(&haystack[last_start..]);
-    return splits;
-}
-
-fn split_slice_once<'a>(haystack: &'a [u8], needle: &'a [u8]) -> Option<(&'a [u8], &'a [u8])> {
-    for i in 0..(haystack.len() - needle.len()) {
-        let selection = if let Some(selection) = haystack.get(i..i + needle.len()) {
-            selection
-        } else {
-            break;
-        };
-        if selection == needle {
-            return Some((&haystack[0..i], &haystack[i + needle.len()..]));
-        }
-    }
-    return None;
-}
-
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Headers<'a> {
     headers: Vec<(&'a str, &'a str)>,
 }
@@ -333,7 +343,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn single_line_request() {}
+    fn single_line_request() {
+        let request = "GET / HTTP/1.1\r\n\r\n".as_bytes();
+        let parsed = Request::parse(request).expect("failed to parse request");
+        let expected = Request {
+            method: Method::Get,
+            resource: Url::parse("/").unwrap(),
+            headers: Headers::default(),
+            body: &[],
+        };
+        assert_eq!(parsed, expected);
+    }
 
     #[test]
     fn parse_full_url() {
