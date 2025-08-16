@@ -106,7 +106,10 @@ impl<'a> Route<'a> {
             let segment_is_dynamic = pattern_seg.chars().next() == Some('{')
                 && pattern_seg.chars().next_back() == Some('}');
             if segment_is_dynamic {
-                params.push((&pattern_seg[1..pattern_seg.len()-1], request_seg.to_owned()));
+                params.push((
+                    &pattern_seg[1..pattern_seg.len() - 1],
+                    request_seg.to_owned(),
+                ));
                 continue;
             }
             if pattern_seg != request_seg {

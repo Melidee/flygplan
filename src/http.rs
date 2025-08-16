@@ -1,5 +1,5 @@
 use crate::{Error, error::Result};
-use std::{fmt::Display, io, vec};
+use std::{fmt::Display, vec};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Request<'a> {
@@ -37,37 +37,6 @@ impl<'a> Request<'a> {
             body,
         })
     }
-
-    /*
-    pub fn parse(from: &'a [u8]) -> Result<Self> {
-        let (first_line, rest) =
-            split_slice_once(from, "\r\n".as_bytes()).ok_or(Error::ParseError)?;
-        let (method, resource) = if let [method_bytes, resource_bytes, b"HTTP/1.1"] =
-            split_slice(first_line, &[b' ']).as_slice()
-        {
-            let method_str = str::from_utf8(method_bytes).map_err(|_| Error::ParseError)?;
-            let method = Method::try_from(method_str)?;
-            let resource_str = str::from_utf8(resource_bytes).map_err(|_| Error::ParseError)?;
-            let resource = Url::parse(resource_str).ok_or(Error::ParseError)?;
-
-            (method, resource)
-        } else {
-            return Err(Error::ParseError);
-        };
-        let (headers_block, body) =
-            split_slice_once(rest, "\r\n\r\n".as_bytes()).ok_or(Error::ParseError)?;
-        let headers_str = str::from_utf8(headers_block).map_err(|_| Error::ParseError)?;
-
-        let headers = Headers::from_lines(&mut headers_str.lines()).ok_or(Error::ParseError)?;
-
-        Ok(Self {
-            method,
-            resource,
-            headers,
-            body,
-        })
-    }
-    */
 
     pub fn set_header(&mut self, header: &'a str, value: &'a str) -> &mut Self {
         self.headers.set(header, value);
@@ -169,6 +138,7 @@ impl<'a> Default for Response<'a> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Status {
     Ok200,
+    BadRequest400,
     NotFound404,
 }
 
@@ -176,6 +146,7 @@ impl Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let method = match self {
             Self::Ok200 => "200 OK",
+            Self::BadRequest400 => "400 Bad Request",
             Self::NotFound404 => "404 NOT FOUND",
         };
         write!(f, "{}", method)

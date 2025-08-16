@@ -39,9 +39,9 @@ impl<'a> Context<'a> {
         &self.request.resource.query_params
     }
 
-    pub fn string(mut self, body: &str) {
+    pub fn string(mut self, body: &str) -> Result<()> {
         self.response.body = body.to_string();
-        self.write().unwrap();
+        self.write()
     }
 
     /*
@@ -54,11 +54,11 @@ impl<'a> Context<'a> {
             .filter(|pair| pair.0 == status)
             .next()
         {
-            (handler)(self)
+            (handler)(self);
+            Ok(())
         } else {
             self.string(&status.to_string())
         }
-        Ok(())
     }
 
     pub fn write(mut self) -> Result<()> {
