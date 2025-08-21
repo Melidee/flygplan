@@ -1,6 +1,8 @@
 pub mod context;
 pub mod error;
 pub mod http;
+pub mod middleware;
+use crate::context::Middleware;
 pub use crate::context::{Context, Handler};
 pub use crate::error::{Error, Result};
 
@@ -15,6 +17,7 @@ use std::{
 pub struct Flygplan<'a> {
     routes: Vec<Route<'a>>,
     status_handlers: Vec<(Status, Handler)>,
+    middlewares: Vec<Middleware>,
 }
 
 impl<'a> Flygplan<'a> {
@@ -22,6 +25,7 @@ impl<'a> Flygplan<'a> {
         Self {
             routes: vec![],
             status_handlers: vec![],
+            middlewares: vec![],
         }
     }
 
@@ -39,6 +43,10 @@ impl<'a> Flygplan<'a> {
         self.status_handlers.push((status, Arc::new(handler)));
     }
 
+    pub fn use_middleware<F: Fn(Context) -> Context + 'static>(&mut self, middleware: F) {
+        self.middlewares.push(Arc::new(middleware));
+    }
+
     pub fn listen_and_serve<A: ToSocketAddrs>(self, addr: A) -> Result<()> {
         let listener = TcpListener::bind(addr).map_err(|e| Error::ConnectionError(e))?;
         self.serve(listener)
@@ -52,25 +60,25 @@ impl<'a> Flygplan<'a> {
                 .read(&mut buf)
                 .map_err(|e| Error::ConnectionError(e))?;
             let request = Request::parse(&buf).unwrap();
-            Self::handle_request(self.routes.clone(), &self.status_handlers, stream, request);
+            Self::handle_request(&self, stream, request);
         }
         Ok(())
     }
 
-    fn handle_request(
-        routes: Vec<Route>,
-        status_handlers: &Vec<(Status, Handler)>,
-        stream: TcpStream,
-        request: Request,
-    ) {
-        for route in routes {
+    fn handle_request(&self, stream: TcpStream, request: Request) {
+        for route in self.routes.iter() {
             if let Some(url_params) = route.matches(&request) {
-                let ctx = Context::new(request.clone(), url_params, status_handlers, stream);
+                let mut ctx =
+                    Context::new(request.clone(), url_params, &self.status_handlers, stream);
+                ctx = self
+                    .middlewares
+                    .iter()
+                    .fold(ctx, |ctx, middleware| middleware(ctx));
                 (route.handler)(ctx);
                 return;
             }
         }
-        Context::new(request, Params::default(), status_handlers, stream)
+        Context::new(request, Params::default(), &self.status_handlers, stream)
             .status(Status::NotFound404)
             .unwrap();
     }
