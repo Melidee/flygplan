@@ -2,9 +2,9 @@ pub mod context;
 pub mod error;
 pub mod http;
 pub mod middleware;
-use crate::context::Middleware;
 pub use crate::context::{Context, Handler};
 pub use crate::error::{Error, Result};
+use crate::middleware::Middleware;
 
 use crate::http::{Method, Params, Request, Status};
 use std::sync::Arc;
@@ -29,21 +29,33 @@ impl<'a> Flygplan<'a> {
         }
     }
 
-    pub fn get<F: Fn(Context) + 'static>(&mut self, pattern: &'a str, handler: F) {
+    pub fn get<F: Fn(Context) -> Result<Context> + 'static>(
+        &mut self,
+        pattern: &'a str,
+        handler: F,
+    ) {
         self.routes
             .push(Route::new(Method::Get, pattern, Arc::new(handler)));
     }
 
-    pub fn post<F: Fn(Context) + 'static>(&mut self, pattern: &'a str, handler: F) {
+    pub fn post<F: Fn(Context) -> Result<Context> + 'static>(
+        &mut self,
+        pattern: &'a str,
+        handler: F,
+    ) {
         self.routes
             .push(Route::new(Method::Post, pattern, Arc::new(handler)));
     }
 
-    pub fn status_handler<F: Fn(Context) + 'static>(&mut self, status: Status, handler: F) {
+    pub fn status_handler<F: Fn(Context) -> Result<Context> + 'static>(
+        &mut self,
+        status: Status,
+        handler: F,
+    ) {
         self.status_handlers.push((status, Arc::new(handler)));
     }
 
-    pub fn use_middleware<F: Fn(Context) -> Context + 'static>(&mut self, middleware: F) {
+    pub fn use_middleware<F: Fn(Handler) -> Handler + 'static>(&mut self, middleware: F) {
         self.middlewares.push(Arc::new(middleware));
     }
 
@@ -70,11 +82,11 @@ impl<'a> Flygplan<'a> {
             if let Some(url_params) = route.matches(&request) {
                 let mut ctx =
                     Context::new(request.clone(), url_params, &self.status_handlers, stream);
-                ctx = self
+                let handler = self
                     .middlewares
                     .iter()
-                    .fold(ctx, |ctx, middleware| middleware(ctx));
-                (route.handler)(ctx);
+                    .fold(route.handler.clone(), |route, middleware| middleware(route));
+                let err = handler(ctx).unwrap();
                 return;
             }
         }

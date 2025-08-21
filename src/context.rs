@@ -6,8 +6,7 @@ use std::sync::Arc;
 use crate::error::{Error, Result};
 use crate::http::{Params, Request, Response, Status};
 
-pub type Handler = Arc<dyn Fn(Context)>;
-pub type Middleware = Arc<dyn Fn(Context) -> Context>;
+pub type Handler = Arc<dyn Fn(Context) -> Result<Context>>;
 
 pub struct Context<'a> {
     pub request: Request<'a>,
@@ -41,12 +40,12 @@ impl<'a> Context<'a> {
         &self.request.resource.query_params
     }
 
-    pub fn string(mut self, body: &str) -> Result<()> {
+    pub fn string(mut self, body: &str) -> Result<Self> {
         self.response.body = body.to_string();
         self.write()
     }
 
-    pub fn file(mut self, path: &str) -> Result<()> {
+    pub fn file(mut self, path: &str) -> Result<Self> {
         let mut file = File::open(path).map_err(|e| Error::ConnectionError(e))?;
         let mut body = vec![];
         file.read_to_end(&mut body).expect("failed to open file");
@@ -57,25 +56,24 @@ impl<'a> Context<'a> {
     /*
      * Respond with a generic HTTP response status handler
      */
-    pub fn status(self, status: Status) -> Result<()> {
+    pub fn status(self, status: Status) -> Result<Self> {
         if let Some((_, handler)) = self
             .status_handlers
             .iter()
             .filter(|pair| pair.0 == status)
             .next()
         {
-            (handler)(self);
-            Ok(())
+            (handler)(self)
         } else {
             self.string(&status.to_string())
         }
     }
 
-    pub fn write(mut self) -> Result<()> {
+    pub fn write(mut self) -> Result<Self> {
         let response = self.response.to_string();
         self.stream
             .write(response.as_bytes())
             .map_err(|e| Error::ConnectionError(e))?;
-        Ok(())
+        Ok(self)
     }
 }
