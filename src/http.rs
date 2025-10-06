@@ -138,6 +138,7 @@ impl<'a> Default for Response<'a> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Status {
     Ok200,
+    SeeOther303,
     BadRequest400,
     NotFound404,
 }
@@ -146,6 +147,7 @@ impl Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let method = match self {
             Self::Ok200 => "200 OK",
+            Self::SeeOther303 => "303 See Other",
             Self::BadRequest400 => "400 Bad Request",
             Self::NotFound404 => "404 NOT FOUND",
         };

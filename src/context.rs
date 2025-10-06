@@ -60,6 +60,12 @@ impl<'a> Context<'a> {
         serde_json::to_writer(&self.stream, &value).map_err(|_| Error::SerializationError)?;
         Ok(self)
     }
+    
+    pub fn redirect(mut self, route: &'a str) -> Result<Self> {
+        self.response.status = Status::SeeOther303;
+        self.response.headers.set("Location", route);
+        self.write()
+    }
 
     /*
      * Respond with a generic HTTP response status handler
