@@ -33,18 +33,22 @@ impl<'a> Flygplan<'a> {
         &mut self,
         pattern: &'a str,
         handler: F,
-    ) {
+    ) -> &mut Route<'a> {
+        let route = Route::new(Method::Get, pattern, Arc::new(handler));
         self.routes
-            .push(Route::new(Method::Get, pattern, Arc::new(handler)));
+            .push(route);
+        return self.routes.last_mut().unwrap();
     }
 
     pub fn post<F: Fn(Context) -> Result<Context> + 'static>(
         &mut self,
         pattern: &'a str,
         handler: F,
-    ) {
+    ) -> &mut Route<'a> {
+        let route = Route::new(Method::Post, pattern, Arc::new(handler));
         self.routes
-            .push(Route::new(Method::Post, pattern, Arc::new(handler)));
+            .push(route);
+        return self.routes.last_mut().unwrap();
     }
 
     pub fn status_handler<F: Fn(Context) -> Result<Context> + 'static>(
@@ -80,13 +84,13 @@ impl<'a> Flygplan<'a> {
     fn handle_request(&self, stream: TcpStream, request: Request) {
         for route in self.routes.iter() {
             if let Some(url_params) = route.matches(&request) {
-                let mut ctx =
+                let ctx =
                     Context::new(request.clone(), url_params, &self.status_handlers, stream);
                 let handler = self
                     .middlewares
                     .iter()
                     .fold(route.handler.clone(), |route, middleware| middleware(route));
-                let err = handler(ctx).unwrap();
+                let _err = handler(ctx).unwrap();
                 return;
             }
         }
@@ -97,7 +101,7 @@ impl<'a> Flygplan<'a> {
 }
 
 #[derive(Clone)]
-struct Route<'a> {
+pub struct Route<'a> {
     method: Method,
     pattern: &'a str,
     handler: Handler,

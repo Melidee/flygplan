@@ -1,7 +1,10 @@
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::os::macos::raw::stat;
 use std::sync::Arc;
+
+use serde::Serialize;
 
 use crate::error::{Error, Result};
 use crate::http::{Params, Request, Response, Status};
@@ -51,6 +54,11 @@ impl<'a> Context<'a> {
         file.read_to_end(&mut body).expect("failed to open file");
         self.response.body = String::from_utf8(body).expect("response file is not UTF-8 encoded");
         self.write()
+    }
+    
+    pub fn json<S: Serialize>(self, value: S) -> Result<Self> {
+        serde_json::to_writer(&self.stream, &value).map_err(|_| Error::SerializationError)?;
+        Ok(self)
     }
 
     /*
