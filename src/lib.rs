@@ -7,6 +7,7 @@ pub use crate::error::{Error, Result};
 use crate::middleware::Middleware;
 
 use crate::http::{Method, Params, Request, Status};
+use std::cell::RefCell;
 use std::sync::Arc;
 use std::vec;
 use std::{
@@ -17,7 +18,7 @@ use std::{
 pub struct Flygplan<'a> {
     routes: Vec<Route<'a>>,
     status_handlers: Vec<(Status, Handler)>,
-    middlewares: Vec<Middleware>,
+    middlewares: Vec<RefCell<Box<dyn Middleware>>>,
 }
 
 impl<'a> Flygplan<'a> {
@@ -35,8 +36,7 @@ impl<'a> Flygplan<'a> {
         handler: F,
     ) -> &mut Route<'a> {
         let route = Route::new(Method::Get, pattern, Arc::new(handler));
-        self.routes
-            .push(route);
+        self.routes.push(route);
         return self.routes.last_mut().unwrap();
     }
 
@@ -46,8 +46,7 @@ impl<'a> Flygplan<'a> {
         handler: F,
     ) -> &mut Route<'a> {
         let route = Route::new(Method::Post, pattern, Arc::new(handler));
-        self.routes
-            .push(route);
+        self.routes.push(route);
         return self.routes.last_mut().unwrap();
     }
 
@@ -59,8 +58,8 @@ impl<'a> Flygplan<'a> {
         self.status_handlers.push((status, Arc::new(handler)));
     }
 
-    pub fn use_middleware<F: Fn(Handler) -> Handler + 'static>(&mut self, middleware: F) {
-        self.middlewares.push(Arc::new(middleware));
+    pub fn use_middleware<M: Middleware + 'static>(&mut self, middleware: M) {
+        self.middlewares.push(RefCell::new(Box::new(middleware)));
     }
 
     pub fn listen_and_serve<A: ToSocketAddrs>(self, addr: A) -> Result<()> {
@@ -84,12 +83,13 @@ impl<'a> Flygplan<'a> {
     fn handle_request(&self, stream: TcpStream, request: Request) {
         for route in self.routes.iter() {
             if let Some(url_params) = route.matches(&request) {
-                let ctx =
-                    Context::new(request.clone(), url_params, &self.status_handlers, stream);
+                let ctx = Context::new(request.clone(), url_params, &self.status_handlers, stream);
                 let handler = self
                     .middlewares
                     .iter()
-                    .fold(route.handler.clone(), |route, middleware| middleware(route));
+                    .fold(route.handler.clone(), |route, middleware| {
+                        middleware.borrow_mut().apply(route)
+                    });
                 let _err = handler(ctx).unwrap();
                 return;
             }
