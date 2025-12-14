@@ -11,12 +11,47 @@ pub struct Request<'a> {
 
 impl<'a> Request<'a> {
     pub fn parse(from: &'a [u8]) -> Result<Self> {
-        let (request_parts, body) =
-            split_slice_once(from, "\r\n\r\n".as_bytes()).ok_or(Error::ParseError)?;
+        let (first_line, header_and_body) =
+            split_slice_once(from, b"\r\n").ok_or(Error::ParseError)?;
+
+        let (method, resource) = str::from_utf8(first_line)
+            .map_err(|_| Error::ParseError)?
+            .split_once(' ')
+            .and_then(|(method_str, url_status)| {
+                let (url_str, status) = url_status.split_once(' ').unwrap_or((url_status, ""));
+                if status != "HTTP/1.1" {
+                    return None;
+                }
+                let method = Method::try_from(method_str).ok().expect("invalid method");
+                let url = Url::parse(url_str).expect("invalid url");
+                Some((method, url))
+            })
+            .ok_or(Error::ParseError)?;
+
+        let (header_bytes, body) =
+            split_slice_once(header_and_body, b"\r\n\r\n").unwrap_or((header_and_body, &[]));
+
+        let mut header_lines = str::from_utf8(header_bytes)
+            .map_err(|_| Error::ParseError)?
+            .split("\r\n");
+        let headers = Headers::from_lines(&mut header_lines).ok_or(Error::ParseError)?;
+        Ok(Self {
+            method,
+            resource,
+            headers,
+            body,
+        })
+    }
+
+    pub fn parse_old(from: &'a [u8]) -> Result<Self> {
+        println!("start! `{:?}`", str::from_utf8(from).unwrap());
+        let (request_parts, body) = split_slice_once(from, b"\r\n\r\n").ok_or(Error::ParseError)?;
+        println!("request!");
         let (first_line, header_str) = str::from_utf8(request_parts)
             .map_err(|_| Error::ParseError)?
             .split_once("\r\n")
             .ok_or(Error::ParseError)?;
+        println!("first line! {first_line}");
         let mut splits = first_line.split(" ");
         let method = splits
             .next()
@@ -44,6 +79,9 @@ impl<'a> Request<'a> {
 
 // used in HTTP request parsing
 fn split_slice_once<'a>(haystack: &'a [u8], needle: &'a [u8]) -> Option<(&'a [u8], &'a [u8])> {
+    if haystack.len() < needle.len() {
+        return None;
+    }
     for i in 0..(haystack.len() - needle.len()) {
         let selection = if let Some(selection) = haystack.get(i..i + needle.len()) {
             selection
@@ -316,13 +354,11 @@ mod tests {
     fn single_line_request() {
         let request = "GET / HTTP/1.1\r\n\r\n".as_bytes();
         let parsed = Request::parse(request).expect("failed to parse request");
-        let expected = Request {
-            method: Method::Get,
-            resource: Url::parse("/").unwrap(),
-            headers: Headers::default(),
-            body: &[],
-        };
-        assert_eq!(parsed, expected);
+
+        assert_eq!(parsed.method, Method::Get);
+        assert_eq!(parsed.resource.path, "/");
+        assert_eq!(parsed.headers, Headers::default());
+        assert_eq!(parsed.body, b"");
     }
 
     #[test]
@@ -361,6 +397,53 @@ mod tests {
             fragment: "fragid",
         };
         assert_eq!(parsed, expected)
+    }
+
+    #[test]
+    fn parse_host_only() {
+        let url = "example.com";
+        let parsed = Url::parse(url).unwrap();
+
+        assert_eq!(parsed.scheme, "");
+        assert_eq!(parsed.host, "example.com");
+        assert_eq!(parsed.port, 0);
+        assert_eq!(parsed.path, "");
+        assert_eq!(parsed.query_params, Params::default());
+        assert_eq!(parsed.fragment, "");
+    }
+
+    #[test]
+    fn parse_host_port_and_path() {
+        let url = "example.com:8080/path";
+        let parsed = Url::parse(url).unwrap();
+
+        assert_eq!(parsed.host, "example.com");
+        assert_eq!(parsed.port, 8080);
+        assert_eq!(parsed.path, "/path");
+    }
+
+    #[test]
+    fn parse_userinfo_without_password() {
+        let url = "ftp://user@example.com/path";
+        let parsed = Url::parse(url).unwrap();
+
+        assert_eq!(parsed.scheme, "ftp");
+        assert_eq!(parsed.username, "user");
+        assert_eq!(parsed.password, "");
+        assert_eq!(parsed.host, "example.com");
+        assert_eq!(parsed.path, "/path");
+    }
+
+    #[test]
+    fn parse_single_slash_url() {
+        let url = "/";
+        let parsed = Url::parse(url).unwrap();
+
+        assert_eq!(parsed.scheme, "");
+        assert_eq!(parsed.username, "");
+        assert_eq!(parsed.password, "");
+        assert_eq!(parsed.host, "");
+        assert_eq!(parsed.path, "/");
     }
 
     #[test]

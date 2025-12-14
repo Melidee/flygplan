@@ -10,6 +10,7 @@ use crate::http::{Params, Request, Response, Status};
 
 pub type Handler = Rc<dyn Fn(Context) -> Result<Context>>;
 
+
 pub struct Context<'a> {
     pub request: Request<'a>,
     pub response: Response<'a>,
