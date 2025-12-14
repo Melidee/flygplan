@@ -8,13 +8,14 @@ use crate::middleware::Middleware;
 
 use crate::http::{Method, Params, Request, Status};
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::rc::Rc;
 use std::vec;
 use std::{
     io::Read,
     net::{TcpListener, TcpStream, ToSocketAddrs},
 };
 
+#[derive(Default)]
 pub struct Flygplan<'a> {
     routes: Vec<Route<'a>>,
     status_handlers: Vec<(Status, Handler)>,
@@ -35,9 +36,9 @@ impl<'a> Flygplan<'a> {
         pattern: &'a str,
         handler: F,
     ) -> &mut Route<'a> {
-        let route = Route::new(Method::Get, pattern, Arc::new(handler));
+        let route = Route::new(Method::Get, pattern, Rc::new(handler));
         self.routes.push(route);
-        return self.routes.last_mut().unwrap();
+       self.routes.last_mut().unwrap()
     }
 
     pub fn post<F: Fn(Context) -> Result<Context> + 'static>(
@@ -45,9 +46,9 @@ impl<'a> Flygplan<'a> {
         pattern: &'a str,
         handler: F,
     ) -> &mut Route<'a> {
-        let route = Route::new(Method::Post, pattern, Arc::new(handler));
+        let route = Route::new(Method::Post, pattern, Rc::new(handler));
         self.routes.push(route);
-        return self.routes.last_mut().unwrap();
+        self.routes.last_mut().unwrap()
     }
 
     pub fn status_handler<F: Fn(Context) -> Result<Context> + 'static>(
@@ -55,7 +56,7 @@ impl<'a> Flygplan<'a> {
         status: Status,
         handler: F,
     ) {
-        self.status_handlers.push((status, Arc::new(handler)));
+        self.status_handlers.push((status, Rc::new(handler)));
     }
 
     pub fn use_middleware<M: Middleware + 'static>(&mut self, middleware: M) {
@@ -63,17 +64,17 @@ impl<'a> Flygplan<'a> {
     }
 
     pub fn listen_and_serve<A: ToSocketAddrs>(self, addr: A) -> Result<()> {
-        let listener = TcpListener::bind(addr).map_err(|e| Error::ConnectionError(e))?;
+        let listener = TcpListener::bind(addr).map_err(Error::ConnectionError)?;
         self.serve(listener)
     }
 
     fn serve(self, listener: TcpListener) -> Result<()> {
         for c in listener.incoming() {
-            let mut stream = c.map_err(|e| Error::ConnectionError(e))?;
+            let mut stream = c.map_err(Error::ConnectionError)?;
             let mut buf = [0u8; 2048];
             stream
                 .read(&mut buf)
-                .map_err(|e| Error::ConnectionError(e))?;
+                .map_err(Error::ConnectionError)?;
             let request = Request::parse(&buf).unwrap();
             Self::handle_request(&self, stream, request);
         }
@@ -127,8 +128,8 @@ impl<'a> Route<'a> {
             return None;
         }
         for (pattern_seg, request_seg) in pattern_segments.iter().zip(request_segments.iter()) {
-            let segment_is_dynamic = pattern_seg.chars().next() == Some('{')
-                && pattern_seg.chars().next_back() == Some('}');
+            let segment_is_dynamic = pattern_seg.starts_with('{')
+                && pattern_seg.ends_with('}');
             if segment_is_dynamic {
                 params.push((
                     &pattern_seg[1..pattern_seg.len() - 1],

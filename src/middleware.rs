@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{rc::Rc};
 
 use crate::{Context, Handler, error::Result};
 
@@ -10,7 +10,7 @@ pub struct Logger {}
 
 impl Middleware for Logger {
     fn apply(&mut self, handler: Handler) -> Handler {
-        Arc::new(move |mut c: Context| -> Result<Context> {
+        Rc::new(move |mut c: Context| -> Result<Context> {
             c = handler(c)?;
             println!(
                 "{} {} HTTP/1.1\n{}",

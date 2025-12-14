@@ -20,13 +20,11 @@ impl<'a> Request<'a> {
         let mut splits = first_line.split(" ");
         let method = splits
             .next()
-            .map(|method| Method::try_from(method).ok())
-            .flatten()
+            .and_then(|method| Method::try_from(method).ok())
             .ok_or(Error::ParseError)?;
         let resource = splits
             .next()
-            .map(|url| Url::parse(url))
-            .flatten()
+            .and_then(Url::parse)
             .ok_or(Error::ParseError)?;
         let headers =
             Headers::from_lines(&mut header_str.split("\r\n")).ok_or(Error::ParseError)?;
@@ -56,7 +54,7 @@ fn split_slice_once<'a>(haystack: &'a [u8], needle: &'a [u8]) -> Option<(&'a [u8
             return Some((&haystack[0..i], &haystack[i + needle.len()..]));
         }
     }
-    return None;
+    None
 }
 
 impl<'a> Display for Request<'a> {
@@ -280,8 +278,7 @@ impl<'a> Params<'a> {
     pub fn get(&self, key: &'a str) -> Option<String> {
         self.params
             .iter()
-            .filter(|(k, _v)| &key == k)
-            .next()
+            .find(|(k, _v)| &key == k)
             .map(|(_k, v)| v.to_string())
     }
 
