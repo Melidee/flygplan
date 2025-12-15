@@ -8,8 +8,8 @@ pub enum Error {
     ConnectionError(#[from] io::Error),
     #[error("Serialization error")]
     SerializationError,
-    #[error("Parse error")]
-    ParseError,
+    #[error("Parse error {0}")]
+    ParseError(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

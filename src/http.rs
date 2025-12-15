@@ -1,5 +1,5 @@
 use crate::{Error, error::Result};
-use std::{fmt::Display, vec};
+use std::{borrow::Cow, fmt::Display, vec};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Request<'a> {
@@ -11,58 +11,31 @@ pub struct Request<'a> {
 
 impl<'a> Request<'a> {
     pub fn parse(from: &'a [u8]) -> Result<Self> {
-        let (first_line, header_and_body) =
-            split_slice_once(from, b"\r\n").ok_or(Error::ParseError)?;
+        let (first_line, header_and_body) = split_slice_once(from, b"\r\n").ok_or(
+            Error::ParseError("HTTP request is formatted incorrectly".into()),
+        )?;
 
         let (method, resource) = str::from_utf8(first_line)
-            .map_err(|_| Error::ParseError)?
+            .map_err(|_| Error::ParseError("HTTP request line is not UTF-8".into()))?
             .split_once(' ')
+            .ok_or(Error::ParseError("".into()))
             .and_then(|(method_str, url_status)| {
                 let (url_str, status) = url_status.split_once(' ').unwrap_or((url_status, ""));
                 if status != "HTTP/1.1" {
-                    return None;
+                    return Err(Error::ParseError(format!("invalid http status `{status}`")));
                 }
                 let method = Method::try_from(method_str).ok().expect("invalid method");
                 let url = Url::parse(url_str).expect("invalid url");
-                Some((method, url))
-            })
-            .ok_or(Error::ParseError)?;
+                Ok((method, url))
+            })?;
 
         let (header_bytes, body) =
             split_slice_once(header_and_body, b"\r\n\r\n").unwrap_or((header_and_body, &[]));
 
         let mut header_lines = str::from_utf8(header_bytes)
-            .map_err(|_| Error::ParseError)?
+            .map_err(|_| Error::ParseError("HTTP headers are not UTF-8".into()))?
             .split("\r\n");
-        let headers = Headers::from_lines(&mut header_lines).ok_or(Error::ParseError)?;
-        Ok(Self {
-            method,
-            resource,
-            headers,
-            body,
-        })
-    }
-
-    pub fn parse_old(from: &'a [u8]) -> Result<Self> {
-        println!("start! `{:?}`", str::from_utf8(from).unwrap());
-        let (request_parts, body) = split_slice_once(from, b"\r\n\r\n").ok_or(Error::ParseError)?;
-        println!("request!");
-        let (first_line, header_str) = str::from_utf8(request_parts)
-            .map_err(|_| Error::ParseError)?
-            .split_once("\r\n")
-            .ok_or(Error::ParseError)?;
-        println!("first line! {first_line}");
-        let mut splits = first_line.split(" ");
-        let method = splits
-            .next()
-            .and_then(|method| Method::try_from(method).ok())
-            .ok_or(Error::ParseError)?;
-        let resource = splits
-            .next()
-            .and_then(Url::parse)
-            .ok_or(Error::ParseError)?;
-        let headers =
-            Headers::from_lines(&mut header_str.split("\r\n")).ok_or(Error::ParseError)?;
+        let headers = Headers::from_lines(&mut header_lines)?;
         Ok(Self {
             method,
             resource,
@@ -119,7 +92,7 @@ impl TryFrom<&str> for Method {
         Ok(match value {
             "GET" => Self::Get,
             "POST" => Self::Post,
-            _ => return Err(Error::ParseError),
+            _ => return Err(Error::ParseError(format!("invalid HTTP method {value}"))),
         })
     }
 
@@ -193,7 +166,7 @@ impl Display for Status {
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Headers<'a> {
-    headers: Vec<(&'a str, &'a str)>,
+    headers: Vec<(Cow<'a, str>, Cow<'a, str>)>,
 }
 
 impl<'a> Headers<'a> {
@@ -201,24 +174,28 @@ impl<'a> Headers<'a> {
         Headers { headers: vec![] }
     }
 
-    fn from_lines<'b: 'a>(lines: &mut impl Iterator<Item = &'b str>) -> Option<Self> {
+    fn from_lines<'b: 'a>(lines: &mut impl Iterator<Item = &'b str>) -> Result<Self> {
         let mut header_map = vec![];
         for line in lines {
             if line.is_empty() {
                 break;
             }
             let mut parts = line.split(": ");
-            let header = parts.next()?;
-            let value = parts.next()?;
-            header_map.push((header, value));
+            let header = parts
+                .next()
+                .ok_or(Error::ParseError("failed to parse header `{line}`".into()))?;
+            let value = parts
+                .next()
+                .ok_or(Error::ParseError("failed to parse header `{line}`".into()))?;
+            header_map.push((header.into(), value.into()));
         }
-        Some(Self {
+        Ok(Self {
             headers: header_map,
         })
     }
 
     pub fn set(&mut self, header: &'a str, value: &'a str) {
-        self.headers.push((header, value));
+        self.headers.push((header.into(), value.into()));
     }
 }
 
@@ -236,14 +213,14 @@ impl<'a> Display for Headers<'a> {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Url<'a> {
-    pub scheme: &'a str,
-    pub username: &'a str,
-    pub password: &'a str,
-    pub host: &'a str,
+    pub scheme: Cow<'a, str>,
+    pub username: Cow<'a, str>,
+    pub password: Cow<'a, str>,
+    pub host: Cow<'a, str>,
     pub port: u16,
-    pub path: &'a str,
+    pub path: Cow<'a, str>,
     pub query_params: Params<'a>,
-    pub fragment: &'a str,
+    pub fragment: Cow<'a, str>,
 }
 
 impl<'a> Url<'a> {
@@ -251,26 +228,33 @@ impl<'a> Url<'a> {
         Self::default()
     }
 
-    fn parse(mut value: &'a str) -> Option<Self> {
-        let mut url = Url::default();
-        (url.scheme, value) = value.split_once("://").unwrap_or(("", value));
+    fn parse(value: &'a str) -> Option<Self> {
+        let (scheme, mut value) = value.split_once("://").unwrap_or(("", value));
         let userpair;
         (userpair, value) = value.split_once("@").unwrap_or(("", value));
-        (url.username, url.password) = userpair.split_once(":").unwrap_or((userpair, ""));
-        (value, url.fragment) = value.split_once("#").unwrap_or((value, ""));
+        let (username, password) = userpair.split_once(":").unwrap_or((userpair, ""));
+        let (mut value, fragment) = value.split_once("#").unwrap_or((value, ""));
         let query;
         (value, query) = value.split_once("?").unwrap_or((value, ""));
-        url.query_params = Params::parse_query_params(query).unwrap_or_default();
-        let hostpair;
-        (hostpair, url.path) = value
+        let query_params = Params::parse_query_params(query).unwrap_or_default();
+        let (hostpair, path) = value
             .find("/")
             .map(|idx| value.split_at(idx))
             .unwrap_or((value, ""));
-        (url.host, url.port) = hostpair
+        let (host, port) = hostpair
             .split_once(":")
             .map(|(host, port)| (host, port.parse().unwrap_or(0)))
             .unwrap_or((hostpair, 0u16));
-        Some(url)
+        Some(Url {
+            scheme: scheme.into(),
+            username: username.into(),
+            password: password.into(),
+            host: host.into(),
+            port,
+            path: path.into(),
+            query_params,
+            fragment: fragment.into(),
+        })
     }
 }
 
@@ -365,38 +349,38 @@ mod tests {
     fn parse_full_url() {
         let url = "abc://username:password@example.com:123/path/data?key=value#fragid";
         let parsed = Url::parse(url).unwrap();
-        let expected = Url {
-            scheme: "abc",
-            username: "username",
-            password: "password",
-            host: "example.com",
-            port: 123,
-            path: "/path/data",
-            query_params: Params {
-                params: vec![("key", "value")],
-            },
-            fragment: "fragid",
-        };
-        assert_eq!(parsed, expected)
+        assert_eq!(parsed.scheme, "abc");
+        assert_eq!(parsed.username, "username");
+        assert_eq!(parsed.password, "password");
+        assert_eq!(parsed.host, "example.com");
+        assert_eq!(parsed.port, 123);
+        assert_eq!(parsed.path, "/path/data");
+        assert_eq!(
+            parsed.query_params,
+            Params {
+                params: vec![("key", "value")]
+            }
+        );
+        assert_eq!(parsed.fragment, "fragid");
     }
 
     #[test]
     fn parse_path_query_frag_url() {
         let url = "/path/data?key=value#fragid";
         let parsed = Url::parse(url).unwrap();
-        let expected = Url {
-            scheme: "",
-            username: "",
-            password: "",
-            host: "",
-            port: 0,
-            path: "/path/data",
-            query_params: Params {
-                params: vec![("key", "value")],
-            },
-            fragment: "fragid",
-        };
-        assert_eq!(parsed, expected)
+        assert_eq!(parsed.scheme, "");
+        assert_eq!(parsed.username, "");
+        assert_eq!(parsed.password, "");
+        assert_eq!(parsed.host, "");
+        assert_eq!(parsed.port, 0);
+        assert_eq!(parsed.path, "/path/data");
+        assert_eq!(
+            parsed.query_params,
+            Params {
+                params: vec![("key", "value")]
+            }
+        );
+        assert_eq!(parsed.fragment, "fragid");
     }
 
     #[test]
@@ -450,35 +434,20 @@ mod tests {
     fn parse_path_only() {
         let url = "/ameliaa";
         let parsed = Url::parse(url).unwrap();
-        let expected = Url {
-            scheme: "",
-            username: "",
-            password: "",
-            host: "",
-            port: 0,
-            path: "/ameliaa",
-            query_params: Params::new(),
-            fragment: "",
-        };
-        assert_eq!(parsed, expected)
+        assert_eq!(parsed.scheme, "");
+        assert_eq!(parsed.username, "");
+        assert_eq!(parsed.password, "");
+        assert_eq!(parsed.host, "");
+        assert_eq!(parsed.port, 0);
+        assert_eq!(parsed.path, "/ameliaa");
+        assert_eq!(parsed.fragment, "");
     }
 
     #[test]
     fn format_full_url() {
-        let url = Url {
-            scheme: "",
-            username: "",
-            password: "",
-            host: "",
-            port: 0,
-            path: "/path/data",
-            query_params: Params {
-                params: vec![("key", "value")],
-            },
-            fragment: "fragid",
-        };
-        let formatted = &url.to_string();
-        let expected = "/path/data?key=value#fragid";
-        assert_eq!(formatted, expected)
+        let url = "abc://username:password@example.com:123/path/data?key=value#fragid";
+        let parsed = Url::parse(url).unwrap();
+        let formatted = &parsed.to_string();
+        assert_eq!(url, formatted)
     }
 }
