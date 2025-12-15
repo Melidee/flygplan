@@ -10,7 +10,6 @@ use crate::http::{Params, Request, Response, Status};
 
 pub type Handler = Rc<dyn Fn(Context) -> Result<Context>>;
 
-
 pub struct Context<'a> {
     pub request: Request<'a>,
     pub response: Response<'a>,
@@ -35,12 +34,12 @@ impl<'a> Context<'a> {
         }
     }
 
-    pub fn url_param(&self, key: &str) -> Option<String> {
+    pub fn path_param(&self, key: &str) -> Option<String> {
         self.url_params.get(key)
     }
 
-    pub fn query_params(&self) -> &Params<'_> {
-        &self.request.resource.query_params
+    pub fn query_param(&self, key: &str) -> Option<String> {
+        self.request.resource.query_params.get(key)
     }
 
     pub fn string(mut self, body: &str) -> Result<Self> {

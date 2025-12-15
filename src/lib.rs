@@ -38,7 +38,7 @@ impl<'a> Flygplan<'a> {
     ) -> &mut Route<'a> {
         let route = Route::new(Method::Get, pattern, Rc::new(handler));
         self.routes.push(route);
-       self.routes.last_mut().unwrap()
+        self.routes.last_mut().unwrap()
     }
 
     pub fn post<F: Fn(Context) -> Result<Context> + 'static>(
@@ -72,9 +72,7 @@ impl<'a> Flygplan<'a> {
         for c in listener.incoming() {
             let mut stream = c.map_err(Error::ConnectionError)?;
             let mut buf = [0u8; 2048];
-            stream
-                .read(&mut buf)
-                .map_err(Error::ConnectionError)?;
+            stream.read(&mut buf).map_err(Error::ConnectionError)?;
             let request = Request::parse(&buf).unwrap();
             Self::handle_request(&self, stream, request);
         }
@@ -128,8 +126,7 @@ impl<'a> Route<'a> {
             return None;
         }
         for (pattern_seg, request_seg) in pattern_segments.iter().zip(request_segments.iter()) {
-            let segment_is_dynamic = pattern_seg.starts_with('{')
-                && pattern_seg.ends_with('}');
+            let segment_is_dynamic = pattern_seg.starts_with('{') && pattern_seg.ends_with('}');
             if segment_is_dynamic {
                 params.push((
                     &pattern_seg[1..pattern_seg.len() - 1],

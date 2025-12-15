@@ -24,8 +24,9 @@ impl<'a> Request<'a> {
                 if status != "HTTP/1.1" {
                     return Err(Error::ParseError(format!("invalid http status `{status}`")));
                 }
-                let method = Method::try_from(method_str).ok().expect("invalid method");
-                let url = Url::parse(url_str).expect("invalid url");
+                let method = Method::try_from(method_str)?;
+                let url = Url::parse(url_str)
+                    .ok_or(Error::ParseError(format!("failed to parse url {url_str}")))?;
                 Ok((method, url))
             })?;
 
