@@ -102,7 +102,7 @@ impl<'a> Flygplan<'a> {
 #[derive(Clone)]
 pub struct Route<'a> {
     method: Method,
-    pattern: &'a str,
+    pattern: Vec<PatternSegment<'a>>,
     handler: Handler,
 }
 
@@ -110,7 +110,7 @@ impl<'a> Route<'a> {
     fn new(method: Method, pattern: &'a str, handler: Handler) -> Self {
         Self {
             method,
-            pattern,
+            pattern: PatternSegment::parse(pattern),
             handler,
         }
     }
@@ -119,25 +119,54 @@ impl<'a> Route<'a> {
         if request.method != self.method {
             return None;
         }
-        let mut params: Params<'_> = Params::new();
-        let pattern_segments = self.pattern.split("/").collect::<Vec<_>>();
-        let request_segments = request.resource.path.split("/").collect::<Vec<_>>();
-        if pattern_segments.len() != request_segments.len() {
-            return None;
-        }
-        for (pattern_seg, request_seg) in pattern_segments.iter().zip(request_segments.iter()) {
-            let segment_is_dynamic = pattern_seg.starts_with('{') && pattern_seg.ends_with('}');
-            if segment_is_dynamic {
-                params.push((
-                    &pattern_seg[1..pattern_seg.len() - 1],
-                    request_seg.to_owned(),
-                ));
-                continue;
-            }
-            if pattern_seg != request_seg {
-                return None;
+        let mut splits = request.resource.path.split("/").peekable();
+        let mut params = Params::new();
+        let mut pattern = self.pattern.iter().peekable();
+        while let Some(seg) = pattern.next() {
+            match seg {
+                PatternSegment::Static(s) => {
+                    if Some(*s) != splits.next() {
+                        return None;
+                    }
+                }
+                PatternSegment::Capture(s) => params.push((s, splits.next()?)),
+                PatternSegment::Wildcard => {
+                    splits.next();
+                }
+                PatternSegment::DoubleWildcard => {
+                    while let Some(part) = splits.peek() {
+                        if Some(&&PatternSegment::Static(part)) == pattern.peek() {
+                            break;
+                        }
+                        splits.next();
+                    }
+                }
             }
         }
         Some(params)
+    }
+}
+
+// /static/**/*/:capture/
+
+#[derive(Clone, Debug, PartialEq)]
+enum PatternSegment<'a> {
+    Static(&'a str),
+    Capture(&'a str),
+    Wildcard,
+    DoubleWildcard,
+}
+
+impl<'a> PatternSegment<'a> {
+    fn parse(pattern: &str) -> Vec<PatternSegment> {
+        pattern
+            .split("/")
+            .map(|seg| match seg {
+                "*" => PatternSegment::Wildcard,
+                "**" => PatternSegment::DoubleWildcard,
+                seg if seg.starts_with(":") => PatternSegment::Capture(&seg[1..]),
+                seg => PatternSegment::Static(seg),
+            })
+            .collect()
     }
 }
