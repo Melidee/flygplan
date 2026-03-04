@@ -147,8 +147,6 @@ impl<'a> Route<'a> {
     }
 }
 
-// /static/**/*/:capture/
-
 #[derive(Clone, Debug, PartialEq)]
 enum PatternSegment<'a> {
     Static(&'a str),
@@ -158,7 +156,7 @@ enum PatternSegment<'a> {
 }
 
 impl<'a> PatternSegment<'a> {
-    fn parse(pattern: &str) -> Vec<PatternSegment> {
+    fn parse(pattern: &'a str) -> Vec<PatternSegment<'a>> {
         pattern
             .split("/")
             .map(|seg| match seg {

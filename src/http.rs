@@ -336,7 +336,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn single_line_request() {
+    fn single_line_request_http() {
         let request = "GET / HTTP/1.1\r\n\r\n".as_bytes();
         let parsed = Request::parse(request).expect("failed to parse request");
 
@@ -385,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_host_only() {
+    fn parse_host_only_url() {
         let url = "example.com";
         let parsed = Url::parse(url).unwrap();
 
@@ -398,7 +398,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_host_port_and_path() {
+    fn parse_host_port_and_path_url() {
         let url = "example.com:8080/path";
         let parsed = Url::parse(url).unwrap();
 
@@ -408,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_userinfo_without_password() {
+    fn parse_userinfo_without_password_url() {
         let url = "ftp://user@example.com/path";
         let parsed = Url::parse(url).unwrap();
 
@@ -432,7 +432,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_path_only() {
+    fn parse_path_only_url() {
         let url = "/ameliaa";
         let parsed = Url::parse(url).unwrap();
         assert_eq!(parsed.scheme, "");
