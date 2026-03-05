@@ -229,7 +229,7 @@ impl<'a> Url<'a> {
         Self::default()
     }
 
-    fn parse(value: &'a str) -> Option<Self> {
+    pub fn parse(value: &'a str) -> Option<Self> {
         let (scheme, mut value) = value.split_once("://").unwrap_or(("", value));
         let userpair;
         (userpair, value) = value.split_once("@").unwrap_or(("", value));
