@@ -8,29 +8,48 @@ The name flygplan comes from the swedish word which means airplane, I picked it 
 ## Example
 
 ```rs
-use flygplan::{Flygplan};
+use std::collections::HashMap;
 
-let mut flyg = Flygplan::new();
-// the Context type is used to get information about the request and write out a response
-flyg.get("/", |c: Context| {
-    c.string("Hello, world!").unwrap();
-});
-flyg.get("/hej", |c| {
-    match c.query_params().get("name") {
+use flygplan::{Context, Flygplan, Result, http::Status, middleware};
+
+fn main() {
+    let mut flyg = Flygplan::new();
+    // the Context type is used to get information about the request and write out a response
+    flyg.get("/", |c: Context| c.file("pages/index.html"));
+    flyg.post("/", |c| {
+        println!("{}", c.request);
+        c.redirect("/whatever")
+    });
+    flyg.get("/hej", |c| match c.query_param("name") {
         Some(name) => c.string(&format!("Hej hej, {}", name)),
         None => c.status(Status::BadRequest400),
-    }
-    .unwrap();
-});
-// dynamic routes are surrounded with parentheses
-flyg.get("/hello/{name}", |c| {
-    let name = c.url_param("name").unwrap();
-    c.string(&format!("Hello, {}!", name)).unwrap();
-});
-// status handlers automatically handle certain HTTP statuses to centralize error handling and common responses
-// some are automatic and others can be called by the Context status method
-flyg.status_handler(Status::NotFound404, |c| {
-    c.string("oopsie whoopsie, page not found").unwrap();
-});
-flyg.listen_and_serve("localhost:8080").unwrap();
+    });
+    // dynamic routes start with a colon
+    flyg.get("/hello/:name", |c| {
+        let name = c.path_param("name").unwrap();
+        c.string(&format!("Hello, {}!", name))
+    });
+    // wildcard patterns can be either * for single sections or ** for multiple
+    flyg.get("/**/wildcard", |c| c.string("wildcard!"));
+    // types serializable by serde can be returned as JSON
+    flyg.get("/some-data", |c| c.json(serializable_data()));
+    flyg.get("/home", |c| c.redirect("/"));
+    // status handlers automatically handle certain HTTP statuses to centralize error handling and common responses
+    // some are automatic and others can be called by the Context status method
+    flyg.status_handler(Status::NotFound404, |c| {
+        c.string("oopsie whoopsie, page not found")
+    });
+
+    flyg.use_middleware(middleware::Logger {});
+    flyg.use_middleware(middleware::RemoveTrailingSlash {});
+    println!("Listening on http://localhost:3333");
+    flyg.listen_and_serve("localhost:3333").unwrap();
+}
+
+fn serializable_data() -> HashMap<String, i32> {
+    let mut map = HashMap::new();
+    map.insert("amelia".to_string(), 19);
+    map.insert("matteo".to_string(), 25);
+    return map;
+}
 ```
