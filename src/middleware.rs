@@ -21,6 +21,19 @@ impl Middleware for Logger {
     }
 }
 
+pub struct AddTrailingSlash {}
+
+impl Middleware for AddTrailingSlash {
+    fn apply(&mut self, handler: Handler) -> Handler {
+        Rc::new(move |mut c: Context<'_>| -> Result<Context> {
+            if !c.request.resource.path.ends_with('/') {
+                c.request.resource.path.to_mut().push('/');
+            }
+            handler(c)
+        })
+    }
+}
+
 pub struct RemoveTrailingSlash {}
 
 impl Middleware for RemoveTrailingSlash {
