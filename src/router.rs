@@ -22,9 +22,12 @@ macro_rules! router {
 /*
 fn test() {
     let server = router! {
+        #![Logger]
+        #![RemoveTrailingSlash]
+    
         GET "/" => |c| { c.string("hello") },
         
-        #[Logger]
+        #[Inherit]
         #[BasicAuth(authFn)]
         "/admin" => {
             GET "/dashboard" => |c| { c.file("dashboard.html") }
