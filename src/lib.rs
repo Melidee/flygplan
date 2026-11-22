@@ -2,6 +2,8 @@ pub mod context;
 pub mod error;
 pub mod http;
 pub mod middleware;
+pub mod router;
+
 pub use crate::context::{Context, Handler};
 pub use crate::error::{Error, Result};
 use crate::middleware::Middleware;
@@ -31,14 +33,18 @@ impl<'a> Flygplan<'a> {
         }
     }
 
+    pub fn route<F: Fn(Context) -> Result<Context> + 'static>(&mut self, method: Method, pattern: &'a str, handler: F) -> &mut Route<'a> {
+        let route = Route::new(method, pattern, Rc::new(handler));
+        self.routes.push(route);
+        self.routes.last_mut().unwrap()
+    }
+
     pub fn get<F: Fn(Context) -> Result<Context> + 'static>(
         &mut self,
         pattern: &'a str,
         handler: F,
     ) -> &mut Route<'a> {
-        let route = Route::new(Method::Get, pattern, Rc::new(handler));
-        self.routes.push(route);
-        self.routes.last_mut().unwrap()
+        self.route(Method::Get, pattern, handler)
     }
 
     pub fn post<F: Fn(Context) -> Result<Context> + 'static>(
@@ -46,9 +52,7 @@ impl<'a> Flygplan<'a> {
         pattern: &'a str,
         handler: F,
     ) -> &mut Route<'a> {
-        let route = Route::new(Method::Post, pattern, Rc::new(handler));
-        self.routes.push(route);
-        self.routes.last_mut().unwrap()
+        self.route(Method::Post, pattern, handler)
     }
 
     pub fn status_handler<F: Fn(Context) -> Result<Context> + 'static>(
