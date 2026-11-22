@@ -18,13 +18,13 @@ use std::{
 };
 
 #[derive(Default)]
-pub struct Flygplan<'a> {
+pub struct Router<'a> {
     routes: Vec<Route<'a>>,
     status_handlers: Vec<(Status, Handler)>,
     middlewares: Vec<RefCell<Box<dyn Middleware>>>,
 }
 
-impl<'a> Flygplan<'a> {
+impl<'a> Router<'a> {
     pub fn new() -> Self {
         Self {
             routes: vec![],
@@ -37,22 +37,6 @@ impl<'a> Flygplan<'a> {
         let route = Route::new(method, pattern, Rc::new(handler));
         self.routes.push(route);
         self.routes.last_mut().unwrap()
-    }
-
-    pub fn get<F: Fn(Context) -> Result<Context> + 'static>(
-        &mut self,
-        pattern: &'a str,
-        handler: F,
-    ) -> &mut Route<'a> {
-        self.route(Method::Get, pattern, handler)
-    }
-
-    pub fn post<F: Fn(Context) -> Result<Context> + 'static>(
-        &mut self,
-        pattern: &'a str,
-        handler: F,
-    ) -> &mut Route<'a> {
-        self.route(Method::Post, pattern, handler)
     }
 
     pub fn status_handler<F: Fn(Context) -> Result<Context> + 'static>(
