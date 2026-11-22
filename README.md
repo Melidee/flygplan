@@ -13,35 +13,38 @@ use std::collections::HashMap;
 use flygplan::{Context, Flygplan, Result, http::Status, middleware};
 
 fn main() {
-    let mut flyg = Flygplan::new();
-    // the Context type is used to get information about the request and write out a response
-    flyg.get("/", |c: Context| c.file("pages/index.html"));
-    flyg.post("/", |c| {
-        println!("{}", c.request);
-        c.redirect("/whatever")
-    });
-    flyg.get("/hej", |c| match c.query_param("name") {
-        Some(name) => c.string(&format!("Hej hej, {}", name)),
-        None => c.status(Status::BadRequest400),
-    });
-    // dynamic routes start with a colon
-    flyg.get("/hello/:name", |c| {
-        let name = c.path_param("name").unwrap();
-        c.string(&format!("Hello, {}!", name))
-    });
-    // wildcard patterns can be either * for single sections or ** for multiple
-    flyg.get("/**/wildcard", |c| c.string("wildcard!"));
-    // types serializable by serde can be returned as JSON
-    flyg.get("/some-data", |c| c.json(serializable_data()));
-    flyg.get("/home", |c| c.redirect("/"));
-    // status handlers automatically handle certain HTTP statuses to centralize error handling and common responses
-    // some are automatic and others can be called by the Context status method
+use std::collections::HashMap;
+
+use flygplan::{Context, Flygplan, Result, http::Status, middleware, router};
+
+fn main() {
+    let mut flyg = router! {
+        // Context is used to get data from the request and write out a response
+        GET "/" => |c: Context| c.file("pages/index.html"),
+        POST "/" => |c| {
+            println!("{}", c.request);
+            c.redirect("/whatever")
+        },
+        GET "/hej" => |c| match c.query_param("name") {
+            Some(name) => c.string(&format!("Hej hej, {}", name)),
+            None => c.status(Status::BadRequest400),
+        },
+        // Dynamic routes start with : and can match an identifier
+        GET "/hello/:name" => |c| {
+            let name = c.path_param("name").unwrap();
+            c.string(&format!("Hello, {}!", name))
+        },
+        GET "/**/wildcard" => |c| c.string("wildcard!"),
+        GET "/some-data" => |c| c.json(serializable_data()),
+        GET "/home" => |c| c.redirect("/"),
+    };
+    
     flyg.status_handler(Status::NotFound404, |c| {
         c.string("oopsie whoopsie, page not found")
     });
-
     flyg.use_middleware(middleware::Logger {});
     flyg.use_middleware(middleware::RemoveTrailingSlash {});
+    
     println!("Listening on http://localhost:3333");
     flyg.listen_and_serve("localhost:3333").unwrap();
 }
