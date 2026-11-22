@@ -8,6 +8,7 @@ macro_rules! router {
             macro_rules! method {
                 (GET) => { $crate::http::Method::Get };
                 (POST) => { $crate::http::Method::Post };
+                ($ident:ident) => { compile_error!("Unknown HTTP method.") };
             }
             
             let mut router = $crate::Flygplan::new();
