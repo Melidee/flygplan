@@ -8,6 +8,12 @@ pub trait Middleware {
 
 pub struct Logger {}
 
+impl Logger {
+    pub fn new() -> Self {
+        Logger {  }
+    }
+}
+
 impl Middleware for Logger {
     fn apply(&mut self, handler: Handler) -> Handler {
         Rc::new(move |mut c: Context| -> Result<Context> {
