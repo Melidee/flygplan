@@ -11,7 +11,7 @@ macro_rules! router {
                 ($ident:ident) => { compile_error!("Unknown HTTP method.") };
             }
             
-            let mut router = $crate::Flygplan::new();
+            let mut router = $crate::Router::new();
             $(
                 router.route(method!($method), $route, $func);
             )*
