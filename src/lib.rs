@@ -4,6 +4,7 @@ pub mod http;
 pub mod middleware;
 pub mod router;
 
+use crate::RouteTarget::Group;
 pub use crate::context::{Context, Handler};
 pub use crate::error::{Error, Result};
 use crate::middleware::Middleware;
@@ -34,7 +35,7 @@ impl<'a> Router<'a> {
     }
 
     pub fn route<F: Fn(Context) -> Result<Context> + 'static>(&mut self, method: Method, pattern: &'a str, handler: F) -> &mut Route<'a> {
-        let route = Route::new(method, pattern, Rc::new(handler));
+        let route = Route::new(method, pattern, RouteTarget::Handler(Rc::new(handler)));
         self.routes.push(route);
         self.routes.last_mut().unwrap()
     }
@@ -71,12 +72,17 @@ impl<'a> Router<'a> {
         for route in self.routes.iter() {
             if let Some(url_params) = route.matches(&request) {
                 let ctx = Context::new(request.clone(), url_params, &self.status_handlers, stream);
-                let handler = self
-                    .middlewares
-                    .iter()
-                    .fold(route.handler.clone(), |route, middleware| {
-                        middleware.borrow_mut().apply(route)
-                    });
+                let handler = match route.target.clone() {
+                    RouteTarget::Handler(handler) => {
+                        self
+                            .middlewares
+                            .iter()
+                            .fold(handler.clone(), |route, middleware| {
+                                middleware.borrow_mut().apply(route)
+                            })
+                    }
+                    Group() => todo!(),
+                };
                 let _err = handler(ctx).unwrap();
                 return;
             }
@@ -88,18 +94,30 @@ impl<'a> Router<'a> {
 }
 
 #[derive(Clone)]
+enum RouteTarget {
+    Handler(Handler),
+    Group()
+}
+
+impl From<Handler> for RouteTarget {
+    fn from(value: Handler) -> Self {
+        return Self::Handler(value)
+    }
+}
+
+#[derive(Clone)]
 pub struct Route<'a> {
     method: Method,
     pattern: Vec<PatternSegment<'a>>,
-    handler: Handler,
+    target: RouteTarget,
 }
 
 impl<'a> Route<'a> {
-    fn new(method: Method, pattern: &'a str, handler: Handler) -> Self {
+    fn new<T: Into<RouteTarget>>(method: Method, pattern: &'a str, target: T) -> Self {
         Self {
             method,
             pattern: PatternSegment::parse(pattern),
-            handler,
+            target: target.into(),
         }
     }
 
