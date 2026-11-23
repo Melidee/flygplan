@@ -15,7 +15,7 @@ pub struct Context<'a> {
     pub response: Response<'a>,
     url_params: Params<'a>,
     status_handlers: &'a Vec<(Status, Handler)>,
-    stream: TcpStream,
+    stream: &'a TcpStream,
 }
 
 impl<'a> Context<'a> {
@@ -23,7 +23,7 @@ impl<'a> Context<'a> {
         request: Request<'a>,
         url_params: Params<'a>,
         status_handlers: &'a Vec<(Status, Handler)>,
-        stream: TcpStream,
+        stream: &'a TcpStream,
     ) -> Self {
         Self {
             request,
@@ -56,7 +56,7 @@ impl<'a> Context<'a> {
     }
 
     pub fn json<S: Serialize>(self, value: S) -> Result<Self> {
-        serde_json::to_writer(&self.stream, &value).map_err(|_| Error::SerializationError)?;
+        serde_json::to_writer(&*self.stream, &value).map_err(|_| Error::SerializationError)?;
         Ok(self)
     }
 

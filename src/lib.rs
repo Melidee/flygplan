@@ -10,7 +10,7 @@ pub use crate::error::{Error, Result};
 use crate::middleware::Middleware;
 
 use crate::http::{Method, Params, Request, Status};
-use std::cell::RefCell;
+use std::cell::{RefCell};
 use std::rc::Rc;
 use std::vec;
 use std::{
@@ -18,11 +18,11 @@ use std::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
 };
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Router<'a> {
     routes: Vec<Route<'a>>,
     status_handlers: Vec<(Status, Handler)>,
-    middlewares: Vec<RefCell<Box<dyn Middleware>>>,
+    middlewares: Vec<Rc<RefCell<dyn Middleware>>>,
 }
 
 impl<'a> Router<'a> {
@@ -49,7 +49,7 @@ impl<'a> Router<'a> {
     }
 
     pub fn use_middleware<M: Middleware + 'static>(&mut self, middleware: M) {
-        self.middlewares.push(RefCell::new(Box::new(middleware)));
+        self.middlewares.push(Rc::new(RefCell::new(middleware)));
     }
 
     pub fn listen_and_serve<A: ToSocketAddrs>(self, addr: A) -> Result<()> {
@@ -68,38 +68,40 @@ impl<'a> Router<'a> {
         Ok(())
     }
 
-    fn handle_request(&self, stream: TcpStream, request: Request) {
+    fn handle_request(&self, stream: TcpStream, mut request: Request) {
         for route in self.routes.iter() {
             if let Some(url_params) = route.matches(&request) {
-                let ctx = Context::new(request.clone(), url_params, &self.status_handlers, stream);
-                let handler = match route.target.clone() {
+                let ctx = Context::new(request.clone(), url_params, &self.status_handlers, &stream);
+                return match route.target.clone() {
                     RouteTarget::Handler(handler) => {
-                        self
+                        let handler = self
                             .middlewares
                             .iter()
                             .fold(handler.clone(), |route, middleware| {
                                 middleware.borrow_mut().apply(route)
-                            })
+                            });
+                        let _err = handler(ctx).unwrap();
                     }
-                    Group() => todo!(),
+                    Group(pattern, router) => {
+                        pattern.apply(&mut request);
+                        router.handle_request(stream, request)
+                    },
                 };
-                let _err = handler(ctx).unwrap();
-                return;
             }
         }
-        Context::new(request, Params::default(), &self.status_handlers, stream)
+        Context::new(request, Params::default(), &self.status_handlers, &stream)
             .status(Status::NotFound404)
             .unwrap();
     }
 }
 
 #[derive(Clone)]
-enum RouteTarget {
+enum RouteTarget<'a> {
     Handler(Handler),
-    Group()
+    Group(Vec<PatternSegment<'a>>, Router<'a>)
 }
 
-impl From<Handler> for RouteTarget {
+impl<'a> From<Handler> for RouteTarget<'a> {
     fn from(value: Handler) -> Self {
         return Self::Handler(value)
     }
@@ -109,11 +111,11 @@ impl From<Handler> for RouteTarget {
 pub struct Route<'a> {
     method: Method,
     pattern: Vec<PatternSegment<'a>>,
-    target: RouteTarget,
+    target: RouteTarget<'a>,
 }
 
 impl<'a> Route<'a> {
-    fn new<T: Into<RouteTarget>>(method: Method, pattern: &'a str, target: T) -> Self {
+    fn new<T: Into<RouteTarget<'a>>>(method: Method, pattern: &'a str, target: T) -> Self {
         Self {
             method,
             pattern: PatternSegment::parse(pattern),
@@ -147,11 +149,16 @@ impl<'a> Route<'a> {
                         splits.next();
                     }
                 }
+                PatternSegment::Never => return None,
             }
         }
         Some(params)
     }
 }
+
+struct RoutePattern<'a> {
+    segments: Vec<PatternSegment<'a>>,
+} 
 
 #[derive(Clone, Debug, PartialEq)]
 enum PatternSegment<'a> {
@@ -159,6 +166,7 @@ enum PatternSegment<'a> {
     Capture(&'a str),
     Wildcard,
     DoubleWildcard,
+    Never,
 }
 
 impl<'a> PatternSegment<'a> {

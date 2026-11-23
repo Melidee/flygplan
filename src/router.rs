@@ -1,7 +1,6 @@
 #[macro_export]
 macro_rules! router_inner {
     ([] $r:ident) => {};
-    // match global middleware
     ([
         #![$middleware:expr]
         $($rest:tt)*
