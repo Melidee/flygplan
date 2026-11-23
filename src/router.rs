@@ -1,3 +1,7 @@
+use std::sync::{Arc, Mutex};
+
+use crate::{Context, http::Method, middleware::Middleware};
+
 #[macro_export]
 macro_rules! router_inner {
     ([] $r:ident) => {};
@@ -22,7 +26,7 @@ macro_rules! router_inner {
         $r.status_handler(status!($code), $func);
         $crate::router_inner!([$($rest)*] $r)
     };
-    
+
     ([
         $(#[$middleware:expr])*
         $method_end:ident $route:expr => $func:expr,
@@ -49,36 +53,67 @@ macro_rules! router {
     };
 }
 
-fn test() {
-    use crate::middleware::Logger;
-    let x = router! {
-        #![Logger::new()]
-
-        #[Logger::new()]
-        GET "/" => |c| {
-            c.string("hello")
-        },
-
-        status 404 => |c| {
-            c.string("not found")
-        },
-    };
+pub struct Router {
+    routes: Vec<Route>,
+    middlewares: Vec<Arc<Mutex<dyn Middleware>>>
 }
 
-/*
-fn test() {
-    let server = router! {
-        #![Logger]
-        #![RemoveTrailingSlash]
-    
-        GET "/" => |c| { c.string("hello") },
-        
-        #[Inherit]
-        #[BasicAuth(authFn)]
-        "/admin" => {
-            GET "/dashboard" => |c| { c.file("dashboard.html") }
+pub struct Route {
+    method: Method,
+    pattern: Pattern,
+    target: RouteTarget
+}
+
+impl<'a> Route {
+    fn new(method: Method, pattern: &str, target: RouteTarget) -> Self {
+        Self {
+            method,
+            pattern: Pattern::parse(pattern.to_owned()),
+            target,
         }
-    };
-    server.listen_and_serve("localhost:3000").unwrap();
+    }
 }
-*/
+
+pub type Handler = Arc<dyn Fn(Context) -> Context>;
+
+pub enum RouteTarget {
+    Handler(Handler),
+    Group(Router)
+}
+
+impl From<Handler> for RouteTarget {
+    fn from(handler: Handler) -> Self {
+        Self::Handler(handler)
+    }
+}
+
+impl From<Router> for RouteTarget {
+    fn from(router: Router) -> Self {
+        Self::Group(router)
+    }
+}
+
+pub struct Pattern {
+    segments: Vec<PatternSegment>
+}
+
+impl Pattern {
+    fn parse(pattern: String) -> Self {
+        Self {
+            segments: pattern.split('/').map(|seg| match seg {
+                "*" => PatternSegment::Wildcard,
+                "**" => PatternSegment::DoubleWildcard,
+                seg if seg.starts_with(":") => PatternSegment::Capture(seg[1..].to_owned()),
+                seg => PatternSegment::Static(seg.to_owned()),
+            }).collect(),
+        }
+    }
+}
+
+pub enum PatternSegment {
+    Static(String),
+    Capture(String),
+    Wildcard,
+    DoubleWildcard,
+    Never,
+}
