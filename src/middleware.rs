@@ -42,6 +42,12 @@ impl Middleware for AddTrailingSlash {
 
 pub struct RemoveTrailingSlash {}
 
+impl RemoveTrailingSlash {
+    pub fn new() -> Self {
+        RemoveTrailingSlash {  }
+    }
+}
+
 impl Middleware for RemoveTrailingSlash {
     fn apply(&mut self, handler: Handler) -> Handler {
         Rc::new(move |mut c: Context| -> Result<Context> {

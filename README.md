@@ -8,19 +8,18 @@ The name flygplan comes from the swedish word which means airplane, I picked it 
 ## Example
 
 ```rs
-use std::collections::HashMap;
+use std::{collections::HashMap};
 
-use flygplan::{Context, Flygplan, Result, http::Status, middleware};
-
-fn main() {
-use std::collections::HashMap;
-
-use flygplan::{Context, Flygplan, Result, http::Status, middleware, router};
+use flygplan::{Context, http::Status, middleware::{Logger, RemoveTrailingSlash}, router};
 
 fn main() {
-    let mut flyg = router! {
+    let server = router! {
+        // Middleware gets added like this
+        #![Logger::new()]
+        #![RemoveTrailingSlash::new()]
+
         // Context is used to get data from the request and write out a response
-        GET "/" => |c: Context| c.file("pages/index.html"),
+        GET "/" => |c: Context<'_>| c.file("pages/index.html"),
         POST "/" => |c| {
             println!("{}", c.request);
             c.redirect("/whatever")
@@ -29,7 +28,7 @@ fn main() {
             Some(name) => c.string(&format!("Hej hej, {}", name)),
             None => c.status(Status::BadRequest400),
         },
-        // Dynamic routes start with : and can match an identifier
+        // Dynamic routes start with : and can be accessed with c.path_param("name")
         GET "/hello/:name" => |c| {
             let name = c.path_param("name").unwrap();
             c.string(&format!("Hello, {}!", name))
@@ -37,16 +36,15 @@ fn main() {
         GET "/**/wildcard" => |c| c.string("wildcard!"),
         GET "/some-data" => |c| c.json(serializable_data()),
         GET "/home" => |c| c.redirect("/"),
+
+        // Status handlers are used to handle specific HTTP status codes to centralize error handling        
+        status 404 => |c| {
+            c.string("oopsie whoopsie, page not found")
+        },
     };
     
-    flyg.status_handler(Status::NotFound404, |c| {
-        c.string("oopsie whoopsie, page not found")
-    });
-    flyg.use_middleware(middleware::Logger {});
-    flyg.use_middleware(middleware::RemoveTrailingSlash {});
-    
     println!("Listening on http://localhost:3333");
-    flyg.listen_and_serve("localhost:3333").unwrap();
+    server.listen_and_serve("localhost:3333").unwrap();
 }
 
 fn serializable_data() -> HashMap<String, i32> {
