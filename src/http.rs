@@ -85,16 +85,30 @@ impl<'a> Display for Request<'a> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Method {
     Get,
+    Query,
+    Head,
     Post,
-    Any,
+    Put,
+    Delete,
+    Connect,
+    Options,
+    Trace,
+    Patch,
 }
 
 impl TryFrom<&str> for Method {
     fn try_from(value: &str) -> std::result::Result<Self, Self::Error> {
         Ok(match value {
             "GET" => Self::Get,
+            "QUERY" => Self::Query,
+            "HEAD" => Self::Head,
             "POST" => Self::Post,
-            "*" => Self::Any,
+            "PUT" => Self::Put,
+            "DELETE" => Self::Delete,
+            "CONNECT" => Self::Connect,
+            "OPTIONS" => Self::Options,
+            "TRACE" => Self::Trace,
+            "PATCH" => Self::Patch,
             _ => return Err(Error::ParseError(format!("invalid HTTP method {value}"))),
         })
     }
@@ -106,8 +120,15 @@ impl Display for Method {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let method = match self {
             Method::Get => "GET",
+            Method::Query => "QUERY",
+            Method::Head => "HEAD",
             Method::Post => "POST",
-            Method::Any => "*"
+            Method::Put => "PUT",
+            Method::Delete => "DELETE",
+            Method::Connect => "CONNECT",
+            Method::Options => "OPTIONS",
+            Method::Trace => "TRACE",
+            Method::Patch => "PATCH",
         };
         write!(f, "{}", method)
     }

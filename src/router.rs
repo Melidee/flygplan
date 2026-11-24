@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     Context, Error, Result,
-    http::{Method, Params, Request, Status},
+    http::{self, Params, Request, Status},
     middleware::Middleware,
 };
 
@@ -47,7 +47,7 @@ macro_rules! router_inner {
         $(
             group.use_middleware($middleware);
         )*
-        
+
         $crate::router_inner!([$($rest)*] $r)
     };
 
@@ -120,7 +120,8 @@ impl Router {
 
     pub fn group(&mut self, pattern: &str, mut router: Router) -> &mut Route {
         router.set_prefix(pattern);
-        let route = Route::new(Method::Any, pattern, RouteTarget::Group(router));
+        let pattern_wildcard = format!("{}/**", pattern);
+        let route = Route::new(Method::Any, &pattern_wildcard, RouteTarget::Group(router));
         self.routes.push(route);
         self.routes
             .last_mut()
@@ -243,7 +244,7 @@ impl<'a> Route {
 
 impl Route {
     fn parse<'a>(&'a self, request: &'a Request) -> Option<PatternMatches<'a>> {
-        if self.method != request.method {
+        if !self.method.matches(request.method) {
             return None;
         }
         return self.pattern.match_url(&request.resource.path);
@@ -323,6 +324,99 @@ impl Pattern {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Method {
+    Get,
+    Query,
+    Head,
+    Post,
+    Put,
+    Delete,
+    Connect,
+    Options,
+    Trace,
+    Patch,
+    Any,
+}
+
+impl Method {
+    fn matches(&self, method: http::Method) -> bool {
+        return self == &Method::from(method);
+    }
+}
+
+impl Into<http::Method> for Method {
+    fn into(self) -> http::Method {
+        match self {
+            Method::Get => http::Method::Get,
+            Method::Query => http::Method::Query,
+            Method::Head => http::Method::Head,
+            Method::Post => http::Method::Post,
+            Method::Put => http::Method::Put,
+            Method::Delete => http::Method::Delete,
+            Method::Connect => http::Method::Connect,
+            Method::Options => http::Method::Options,
+            Method::Trace => http::Method::Trace,
+            Method::Patch => http::Method::Patch,
+            Method::Any => panic!("Cannot convert Method::Any to http::Method"),
+        }
+    }
+}
+
+impl From<http::Method> for Method {
+    fn from(value: http::Method) -> Self {
+        match value {
+            http::Method::Get => Self::Get,
+            http::Method::Query => Self::Query,
+            http::Method::Head => Self::Head,
+            http::Method::Post => Self::Post,
+            http::Method::Put => Self::Put,
+            http::Method::Delete => Self::Delete,
+            http::Method::Connect => Self::Connect,
+            http::Method::Options => Self::Options,
+            http::Method::Trace => Self::Trace,
+            http::Method::Patch => Self::Patch,
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! method {
+    (GET) => {
+        $crate::router::Method::Get
+    };
+    (QUERY) => {
+        $crate::router::Method::Query
+    };
+    (HEAD) => {
+        $crate::router::Method::Head
+    };
+    (POST) => {
+        $crate::router::Method::Post
+    };
+    (PUT) => {
+        $crate::router::Method::Put
+    };
+    (DELETE) => {
+        $crate::router::Method::Delete
+    };
+    (CONNECT) => {
+        $crate::router::Method::Connect
+    };
+    (OPTIONS) => {
+        $crate::router::Method::Options
+    };
+    (TRACE) => {
+        $crate::router::Method::Trace
+    };
+    (PATCH) => {
+        $crate::router::Method::Patch
+    };
+    (*) => {
+        $crate::router::Method::Any
+    };
+}
+
 pub enum PatternSegment {
     Static(String),
     Capture(String),
@@ -356,7 +450,7 @@ impl<'a> PatternMatches<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http::{Headers, Method, Url};
+    use crate::http::{Headers, Url};
 
     fn empty_handler() -> RouteTarget {
         return RouteTarget::Handler(Arc::new(|c| Ok(c)));
@@ -364,7 +458,7 @@ mod tests {
 
     fn test_request<'a>(method: Method, path: &'a str) -> Request<'a> {
         return Request {
-            method: method,
+            method: method.into(),
             resource: Url::parse(path).unwrap(),
             headers: Headers::new(),
             body: &[],
