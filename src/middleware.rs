@@ -1,6 +1,6 @@
-use std::rc::Rc;
+use std::{rc::Rc, sync::Arc};
 
-use crate::{Context, Handler, error::Result};
+use crate::{Context, error::Result, router::Handler};
 
 pub trait Middleware {
     fn apply(&mut self, handler: Handler) -> Handler;
@@ -16,7 +16,7 @@ impl Logger {
 
 impl Middleware for Logger {
     fn apply(&mut self, handler: Handler) -> Handler {
-        Rc::new(move |mut c: Context| -> Result<Context> {
+        Arc::new(move |mut c: Context| -> Result<Context> {
             c = handler(c)?;
             println!(
                 "{} {} HTTP/1.1\t{}",
@@ -31,7 +31,7 @@ pub struct AddTrailingSlash {}
 
 impl Middleware for AddTrailingSlash {
     fn apply(&mut self, handler: Handler) -> Handler {
-        Rc::new(move |mut c: Context<'_>| -> Result<Context> {
+        Arc::new(move |mut c: Context<'_>| -> Result<Context> {
             if !c.request.resource.path.ends_with('/') {
                 c.request.resource.path.to_mut().push('/');
             }
@@ -50,7 +50,7 @@ impl RemoveTrailingSlash {
 
 impl Middleware for RemoveTrailingSlash {
     fn apply(&mut self, handler: Handler) -> Handler {
-        Rc::new(move |mut c: Context| -> Result<Context> {
+        Arc::new(move |mut c: Context| -> Result<Context> {
             c.request.resource.path = c
                 .request
                 .resource
