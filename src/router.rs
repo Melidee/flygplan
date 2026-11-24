@@ -123,7 +123,7 @@ impl Router {
             .unwrap_or((self.get_status_handler(Status::NotFound404), Params::new()));
         let context = Context::new(request.clone(), url_params);
         let result = handler(context);
-        self.write_handled(stream, result.unwrap()).expect("todo")
+        self.write_handled(stream, result.unwrap()).expect("todo");
     }
 
     fn find_handler<'a>(&'a self, request: &'a Request) -> Option<(Handler, Params<'a>)> {
