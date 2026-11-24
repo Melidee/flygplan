@@ -298,6 +298,15 @@ impl<'a> Params<'a> {
         self.params.push(pair);
     }
 
+    pub(crate) fn with(mut self, pair: (&'a str, &'a str)) -> Self {
+        self.params.push(pair);
+        self
+    }
+
+    pub(crate) fn pairs(&self) -> &Vec<(&'a str, &'a str)> {
+        &self.params
+    }
+
     pub fn get(&self, key: &'a str) -> Option<String> {
         self.params
             .iter()

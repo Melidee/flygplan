@@ -131,8 +131,20 @@ impl Router {
             .iter()
             .find_map(|route| Some((route, route.parse(&request)?)))
             .map(|(route, matches)| match &route.target {
-                RouteTarget::Handler(handler) => Some((handler.clone(), matches.params())),
-                RouteTarget::Group(group) => group.find_handler(request),
+                RouteTarget::Handler(handler) => {
+                    let params = matches.params();
+                    let dressed = Self::dressed_handler(handler.clone(), self.middlewares.clone());
+                    Some((dressed, params))
+                }
+                RouteTarget::Group(group) => {
+                    let (handler, params) = group.find_handler(request)?;
+                    let params = params
+                        .pairs()
+                        .iter()
+                        .fold(matches.params(), |params, pair| params.with(*pair));
+                    let dressed = Self::dressed_handler(handler, self.middlewares.clone());
+                    Some((dressed, params))
+                }
             })
             .flatten()
     }
@@ -275,7 +287,7 @@ impl<'a> PatternMatches<'a> {
         Self { matches: vec![] }
     }
 
-    fn params(&'a self) -> Params<'a> {
+    fn params(self) -> Params<'a> {
         self.matches
             .iter()
             .filter_map(|(seg, matched)| match seg {
