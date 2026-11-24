@@ -1,6 +1,16 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::BTreeMap,
+    io::{Read, Write},
+    net::{TcpListener, TcpStream, ToSocketAddrs},
+    prelude::rust_2015,
+    sync::{Arc, Mutex},
+};
 
-use crate::{Context, http::Method, middleware::Middleware};
+use crate::{
+    Context, Error, Result,
+    http::{Method, Params, Request, Status},
+    middleware::{self, Middleware},
+};
 
 #[macro_export]
 macro_rules! router_inner {
@@ -55,13 +65,98 @@ macro_rules! router {
 
 pub struct Router {
     routes: Vec<Route>,
-    middlewares: Vec<Arc<Mutex<dyn Middleware>>>
+    status_handlers: Vec<(Status, Handler)>,
+    middlewares: Vec<Arc<Mutex<dyn Middleware>>>,
+}
+
+impl Router {
+    fn new() -> Self {
+        Self {
+            routes: vec![],
+            status_handlers: vec![],
+            middlewares: vec![],
+        }
+    }
+
+    fn route<F: Fn(Context) -> Context + 'static>(
+        &mut self,
+        method: Method,
+        pattern: &str,
+        handler: F,
+    ) -> &mut Route {
+        let route = Route::new(method, pattern, RouteTarget::Handler(Arc::new(handler)));
+        self.routes.push(route);
+        self.routes
+            .last_mut()
+            .expect("the route just pushed is the last element")
+    }
+
+    fn use_middleware<M: Middleware + 'static>(&mut self, middleware: M) {
+        self.middlewares.push(Arc::new(Mutex::new(middleware)));
+    }
+
+    pub fn listen_and_serve<A: ToSocketAddrs>(self, addr: A) -> Result<()> {
+        let listener = TcpListener::bind(addr).map_err(Error::ConnectionError)?;
+        self.serve(listener)
+    }
+
+    fn serve(self, listener: TcpListener) -> Result<()> {
+        for c in listener.incoming() {
+            let mut stream = c.map_err(Error::ConnectionError)?;
+            let mut buf = [0u8; 2048];
+            stream.read(&mut buf).map_err(Error::ConnectionError)?;
+            let request = Request::parse(&buf).unwrap();
+            self.handle_request(&mut stream, request);
+        }
+        Ok(())
+    }
+
+    fn handle_request(&self, stream: &mut TcpStream, mut request: Request) {
+        let route_pair = self
+            .routes
+            .iter()
+            .find_map(|route| Some((route, route.parse(&request)?)));
+        if let Some((route, url_params)) = route_pair {
+            match &route.target {
+                RouteTarget::Handler(handler) => {
+                    let context = Context::new(request, url_params);
+                    let result = handler(context);
+                    self.write_handled(stream, result.unwrap()).unwrap();
+                }
+                RouteTarget::Group(group) => {
+                    group.handle_request(stream, request);
+                }
+            }
+        } else {
+            let handler = self.get_status_handler(Status::NotFound404);
+            let context = Context::new(request, Params::new());
+            let result = handler(context);
+            self.write_handled(stream, result.unwrap()).unwrap();
+            return;
+        }
+    }
+
+    fn write_handled(&self, stream: &mut TcpStream, context: Context) -> Result<()> {
+        stream
+            .write_all(context.response.to_string().as_bytes())
+            .map_err(Error::ConnectionError)
+    }
+
+    fn get_status_handler(&self, status: Status) -> Handler {
+        self.status_handlers
+            .iter()
+            .find(|(s, _handler)| *s == status)
+            .map(|(_s, handler)| handler.clone())
+            .unwrap_or(Arc::new(move |c: Context| {
+                c.string(&status.clone().to_string())
+            }))
+    }
 }
 
 pub struct Route {
     method: Method,
     pattern: Pattern,
-    target: RouteTarget
+    target: RouteTarget,
 }
 
 impl<'a> Route {
@@ -74,11 +169,17 @@ impl<'a> Route {
     }
 }
 
-pub type Handler = Arc<dyn Fn(Context) -> Context>;
+impl Route {
+    fn parse(&self, request: &Request) -> Option<PatternMatches> {
+        todo!()
+    }
+}
+
+pub type Handler = Arc<dyn Fn(Context) -> Result<Context>>;
 
 pub enum RouteTarget {
     Handler(Handler),
-    Group(Router)
+    Group(Router),
 }
 
 impl From<Handler> for RouteTarget {
@@ -94,19 +195,41 @@ impl From<Router> for RouteTarget {
 }
 
 pub struct Pattern {
-    segments: Vec<PatternSegment>
+    segments: Vec<PatternSegment>,
 }
 
 impl Pattern {
     fn parse(pattern: String) -> Self {
         Self {
-            segments: pattern.split('/').map(|seg| match seg {
-                "*" => PatternSegment::Wildcard,
-                "**" => PatternSegment::DoubleWildcard,
-                seg if seg.starts_with(":") => PatternSegment::Capture(seg[1..].to_owned()),
-                seg => PatternSegment::Static(seg.to_owned()),
-            }).collect(),
+            segments: pattern
+                .split('/')
+                .map(|seg| match seg {
+                    "*" => PatternSegment::Wildcard,
+                    "**" => PatternSegment::DoubleWildcard,
+                    seg if seg.starts_with(":") => PatternSegment::Capture(seg[1..].to_owned()),
+                    seg => PatternSegment::Static(seg.to_owned()),
+                })
+                .collect(),
         }
+    }
+}
+
+pub struct PatternMatches<'a> {
+    matches: Vec<(PatternSegment, &'a str)>,
+}
+
+impl<'a> PatternMatches<'a> {
+    fn params(&'a self) -> Params<'a> {
+        self.matches
+            .iter()
+            .filter_map(|(seg, matched)| match seg {
+                PatternSegment::Capture(key) => Some((&key[1..], *matched)),
+                _ => None,
+            })
+            .fold(Params::new(), |mut params, pair| {
+                params.push(pair);
+                params
+            })
     }
 }
 

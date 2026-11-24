@@ -1,6 +1,5 @@
 use std::fs::File;
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::io::Read;
 use std::rc::Rc;
 
 use serde::Serialize;
@@ -14,23 +13,17 @@ pub struct Context<'a> {
     pub request: Request<'a>,
     pub response: Response<'a>,
     url_params: Params<'a>,
-    status_handlers: &'a Vec<(Status, Handler)>,
-    stream: &'a TcpStream,
 }
 
 impl<'a> Context<'a> {
     pub fn new(
         request: Request<'a>,
         url_params: Params<'a>,
-        status_handlers: &'a Vec<(Status, Handler)>,
-        stream: &'a TcpStream,
     ) -> Self {
         Self {
             request,
             response: Response::default(),
             url_params,
-            status_handlers,
-            stream,
         }
     }
 
@@ -44,7 +37,7 @@ impl<'a> Context<'a> {
 
     pub fn string(mut self, body: &str) -> Result<Self> {
         self.response.body = body.to_string();
-        self.write()
+        Ok(self)
     }
 
     pub fn file(mut self, path: &str) -> Result<Self> {
@@ -52,40 +45,24 @@ impl<'a> Context<'a> {
         let mut body = vec![];
         file.read_to_end(&mut body).expect("failed to open file");
         self.response.body = String::from_utf8(body).expect("response file is not UTF-8 encoded");
-        self.write()
+        Ok(self)
     }
 
-    pub fn json<S: Serialize>(self, value: S) -> Result<Self> {
-        serde_json::to_writer(&*self.stream, &value).map_err(|_| Error::SerializationError)?;
+    pub fn json<S: Serialize>(mut self, value: S) -> Result<Self> {
+        self.response.body = serde_json::to_string(&value).map_err(|_| Error::SerializationError)?;
         Ok(self)
     }
 
     pub fn redirect(mut self, route: &'a str) -> Result<Self> {
         self.response.status = Status::SeeOther303;
         self.response.headers.set("Location", route);
-        self.write()
+        Ok(self)
     }
 
     /*
      * Respond with a generic HTTP response status handler
      */
     pub fn status(self, status: Status) -> Result<Self> {
-        if let Some((_, handler)) = self
-            .status_handlers
-            .iter()
-            .find(|(req_status, _)| *req_status == status)
-        {
-            (handler)(self)
-        } else {
-            self.string(&status.to_string())
-        }
-    }
-
-    pub fn write(mut self) -> Result<Self> {
-        let response = self.response.to_string();
-        self.stream
-            .write(response.as_bytes())
-            .map_err(Error::ConnectionError)?;
-        Ok(self)
+        Err(Error::Status(status))
     }
 }
