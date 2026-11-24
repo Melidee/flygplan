@@ -70,7 +70,7 @@ pub struct Router {
 }
 
 impl Router {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             routes: vec![],
             status_handlers: vec![],
@@ -78,7 +78,7 @@ impl Router {
         }
     }
 
-    fn route<F: Fn(Context) -> Context + 'static>(
+    pub fn route<F: Fn(Context) -> Result<Context> + 'static>(
         &mut self,
         method: Method,
         pattern: &str,
@@ -91,7 +91,15 @@ impl Router {
             .expect("the route just pushed is the last element")
     }
 
-    fn use_middleware<M: Middleware + 'static>(&mut self, middleware: M) {
+    pub fn status_handler<F: Fn(Context) -> Result<Context> + 'static>(
+        &mut self,
+        status: Status,
+        handler: F,
+    ) {
+        self.status_handlers.push((status, Arc::new(handler)));
+    }
+
+    pub fn use_middleware<M: Middleware + 'static>(&mut self, middleware: M) {
         self.middlewares.push(Arc::new(Mutex::new(middleware)));
     }
 
@@ -100,7 +108,7 @@ impl Router {
         self.serve(listener)
     }
 
-    fn serve(self, listener: TcpListener) -> Result<()> {
+    pub fn serve(self, listener: TcpListener) -> Result<()> {
         for c in listener.incoming() {
             let mut stream = c.map_err(Error::ConnectionError)?;
             let mut buf = [0u8; 2048];
@@ -111,15 +119,16 @@ impl Router {
         Ok(())
     }
 
-    fn handle_request(&self, stream: &mut TcpStream, mut request: Request) {
+    fn handle_request(&self, stream: &mut TcpStream, request: Request) {
         let route_pair = self
             .routes
             .iter()
             .find_map(|route| Some((route, route.parse(&request)?)));
-        if let Some((route, url_params)) = route_pair {
+        if let Some((route, matches)) = route_pair {
             match &route.target {
                 RouteTarget::Handler(handler) => {
-                    let context = Context::new(request, url_params);
+                    // TODO: get rid of that clone
+                    let context = Context::new(request.clone(), matches.params());
                     let result = handler(context);
                     self.write_handled(stream, result.unwrap()).unwrap();
                 }
@@ -145,6 +154,7 @@ impl Router {
     fn get_status_handler(&self, status: Status) -> Handler {
         self.status_handlers
             .iter()
+            .rev()
             .find(|(s, _handler)| *s == status)
             .map(|(_s, handler)| handler.clone())
             .unwrap_or(Arc::new(move |c: Context| {
@@ -170,8 +180,11 @@ impl<'a> Route {
 }
 
 impl Route {
-    fn parse(&self, request: &Request) -> Option<PatternMatches> {
-        todo!()
+    fn parse<'a>(&self, request: &'a Request) -> Option<PatternMatches<'a>> {
+        if self.method != request.method {
+            return None;
+        }
+        return self.pattern.match_url(&request.resource.path)
     }
 }
 
@@ -212,6 +225,10 @@ impl Pattern {
                 .collect(),
         }
     }
+
+    fn match_url<'a>(&self, url: &'a str) -> Option<PatternMatches<'a>> {
+        todo!()
+    }
 }
 
 pub struct PatternMatches<'a> {
@@ -239,4 +256,99 @@ pub enum PatternSegment {
     Wildcard,
     DoubleWildcard,
     Never,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::http::{Headers, Method, Url};
+
+    fn empty_handler() -> RouteTarget {
+        return RouteTarget::Handler(Arc::new(|c| Ok(c)));
+    }
+
+    fn test_request<'a>(method: Method, path: &'a str) -> Request<'a> {
+        return Request {
+            method: method,
+            resource: Url::parse(path).unwrap(),
+            headers: Headers::new(),
+            body: &[],
+        };
+    }
+
+    #[test]
+    fn router_matches_single_slash() {
+        let route = Route::new(Method::Get, "/", empty_handler());
+        assert!(route.parse(&test_request(Method::Get, "/")).is_some());
+    }
+
+    #[test]
+    fn router_matches_simple_path() {
+        let route = Route::new(Method::Get, "/hello/world", empty_handler());
+        assert!(
+            route
+                .parse(&test_request(Method::Get, "/hello/world"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn everything_matches_wildcard() {
+        let route = Route::new(Method::Get, "/*", empty_handler());
+        assert!(route.parse(&test_request(Method::Get, "/")).is_some());
+        assert!(route.parse(&test_request(Method::Get, "/hi")).is_some());
+        assert!(route.parse(&test_request(Method::Get, "/1234")).is_some());
+        assert!(
+            route
+                .parse(&test_request(Method::Get, "/trailingslash/"))
+                .is_some()
+        );
+        assert!(
+            route
+                .parse(&test_request(Method::Get, "/params/?key=val&key2=val2"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn everything_matches_double_wildcard() {
+        let route = Route::new(Method::Get, "/**", empty_handler());
+        assert!(route.parse(&test_request(Method::Get, "/")).is_some());
+        assert!(route.parse(&test_request(Method::Get, "/hello")).is_some());
+        assert!(
+            route
+                .parse(&test_request(Method::Get, "/hello/world"))
+                .is_some()
+        );
+        assert!(
+            route
+                .parse(&test_request(Method::Get, "/a/b/c/d/e/f/g/"))
+                .is_some()
+        );
+        assert!(
+            route
+                .parse(&test_request(Method::Get, "/hello?key=val&key2=val2"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn wildcard_matches_with_other_patterns() {
+        let route = Route::new(Method::Get, "/hello/*/world", empty_handler());
+        assert!(
+            route
+                .parse(&test_request(Method::Get, "/hello/name/world"))
+                .is_some()
+        );
+        assert!(
+            route
+                .parse(&test_request(Method::Get, "/hello/12345/world"))
+                .is_some()
+        );
+        assert!(
+            !route
+                .parse(&test_request(Method::Get, "/hello/world"))
+                .is_some()
+        );
+    }
 }
