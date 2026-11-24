@@ -22,6 +22,7 @@ macro_rules! router_inner {
     };
 
     ([
+        $(#[$middleware:expr])*
         status $code:tt => $func:expr,
         $($rest:tt)*
     ] $r:ident) => {
@@ -38,13 +39,18 @@ macro_rules! router_inner {
     };
 
     ([
+        $(#[$middleware:expr])*
         group $route:expr => {$($body:tt)*},
         $($rest:tt)*
     ] $r:ident) => {
-        $r.group($route, router!($($body)*));
+        let group = $r.group($route, router!($($body)*));
+        $(
+            group.use_middleware($middleware);
+        )*
+        
         $crate::router_inner!([$($rest)*] $r)
     };
-    
+
     ([
         $(#[$middleware:expr])*
         $method_end:ident $route:expr => $func:expr,
@@ -55,7 +61,10 @@ macro_rules! router_inner {
             (POST) => { $crate::http::Method::Post };
             ($ident:ident) => { compile_error!("Unknown HTTP method.") };
         }
-        $r.route(method!($method_end), $route, $func);
+        let route = $r.route(method!($method_end), $route, $func);
+        $(
+            route.use_middleware($middleware);
+        )*
         $crate::router_inner!([$($rest)*] $r)
     };
 }
@@ -162,22 +171,26 @@ impl Router {
             .map(|(route, matches)| match &route.target {
                 RouteTarget::Handler(handler) => {
                     let params = matches.params();
-                    let dressed = Self::dressed_handler(handler.clone(), self.middlewares.clone());
-                    Some((dressed, params))
+                    let handler = route.wrap_handler(handler.clone());
+                    let handler = self.wrap_handler(handler.clone());
+                    Some((handler, params))
                 }
                 RouteTarget::Group(group) => {
                     let (handler, params) = group.find_handler(request)?;
-                    let dressed = Self::dressed_handler(handler, self.middlewares.clone());
+                    let handler = route.wrap_handler(handler.clone());
+                    let dressed = self.wrap_handler(handler);
                     Some((dressed, params))
                 }
             })
             .flatten()
     }
 
-    fn dressed_handler(handler: Handler, middlewares: Vec<Arc<Mutex<dyn Middleware>>>) -> Handler {
-        middlewares.iter().fold(handler, |handler, middleware| {
-            middleware.lock().unwrap().apply(handler)
-        })
+    fn wrap_handler(&self, handler: Handler) -> Handler {
+        self.middlewares
+            .iter()
+            .fold(handler, |handler, middleware| {
+                middleware.lock().unwrap().apply(handler)
+            })
     }
 
     fn write_handled(&self, stream: &mut TcpStream, context: Context) -> Result<()> {
@@ -202,6 +215,7 @@ pub struct Route {
     method: Method,
     pattern: Pattern,
     target: RouteTarget,
+    middlewares: Vec<Arc<Mutex<dyn Middleware>>>,
 }
 
 impl<'a> Route {
@@ -210,7 +224,20 @@ impl<'a> Route {
             method,
             pattern: Pattern::parse(pattern.to_owned()),
             target,
+            middlewares: vec![],
         }
+    }
+
+    pub fn use_middleware<M: Middleware + 'static>(&mut self, middleware: M) {
+        self.middlewares.push(Arc::new(Mutex::new(middleware)));
+    }
+
+    fn wrap_handler(&self, handler: Handler) -> Handler {
+        self.middlewares
+            .iter()
+            .fold(handler, |handler, middleware| {
+                middleware.lock().unwrap().apply(handler)
+            })
     }
 }
 
