@@ -1,15 +1,13 @@
 use std::{
-    collections::BTreeMap,
     io::{Read, Write},
     net::{TcpListener, TcpStream, ToSocketAddrs},
-    prelude::rust_2015,
     sync::{Arc, Mutex},
 };
 
 use crate::{
     Context, Error, Result,
     http::{Method, Params, Request, Status},
-    middleware::{self, Middleware},
+    middleware::Middleware,
 };
 
 #[macro_export]
@@ -120,29 +118,29 @@ impl Router {
     }
 
     fn handle_request(&self, stream: &mut TcpStream, request: Request) {
-        let route_pair = self
-            .routes
+        let (handler, url_params) = self
+            .find_handler(&request)
+            .unwrap_or((self.get_status_handler(Status::NotFound404), Params::new()));
+        let context = Context::new(request.clone(), url_params);
+        let result = handler(context);
+        self.write_handled(stream, result.unwrap()).expect("todo")
+    }
+
+    fn find_handler<'a>(&'a self, request: &'a Request) -> Option<(Handler, Params<'a>)> {
+        self.routes
             .iter()
-            .find_map(|route| Some((route, route.parse(&request)?)));
-        if let Some((route, matches)) = route_pair {
-            match &route.target {
-                RouteTarget::Handler(handler) => {
-                    // TODO: get rid of that clone
-                    let context = Context::new(request.clone(), matches.params());
-                    let result = handler(context);
-                    self.write_handled(stream, result.unwrap()).unwrap();
-                }
-                RouteTarget::Group(group) => {
-                    group.handle_request(stream, request);
-                }
-            }
-        } else {
-            let handler = self.get_status_handler(Status::NotFound404);
-            let context = Context::new(request, Params::new());
-            let result = handler(context);
-            self.write_handled(stream, result.unwrap()).unwrap();
-            return;
-        }
+            .find_map(|route| Some((route, route.parse(&request)?)))
+            .map(|(route, matches)| match &route.target {
+                RouteTarget::Handler(handler) => Some((handler.clone(), matches.params())),
+                RouteTarget::Group(group) => group.find_handler(request),
+            })
+            .flatten()
+    }
+
+    fn dressed_handler(handler: Handler, middlewares: Vec<Arc<Mutex<dyn Middleware>>>) -> Handler {
+        middlewares.iter().fold(handler, |handler, middleware| {
+            middleware.lock().unwrap().apply(handler)
+        })
     }
 
     fn write_handled(&self, stream: &mut TcpStream, context: Context) -> Result<()> {
@@ -180,11 +178,11 @@ impl<'a> Route {
 }
 
 impl Route {
-    fn parse<'a>(&self, request: &'a Request) -> Option<PatternMatches<'a>> {
+    fn parse<'a>(&'a self, request: &'a Request) -> Option<PatternMatches<'a>> {
         if self.method != request.method {
             return None;
         }
-        return self.pattern.match_url(&request.resource.path)
+        return self.pattern.match_url(&request.resource.path);
     }
 }
 
@@ -226,16 +224,57 @@ impl Pattern {
         }
     }
 
-    fn match_url<'a>(&self, url: &'a str) -> Option<PatternMatches<'a>> {
-        todo!()
+    fn match_url<'a>(&'a self, url: &'a str) -> Option<PatternMatches<'a>> {
+        let mut matches = PatternMatches::new();
+        let mut splits = url.split('/').peekable();
+        let mut segments = self.segments.iter().peekable();
+        let mut current_segment = segments.next();
+        while let Some(split) = splits.next() {
+            match current_segment? {
+                PatternSegment::Static(seg) => {
+                    if seg != split {
+                        return None;
+                    }
+                    matches.matches.push((current_segment?, split));
+                }
+                PatternSegment::Capture(_) | PatternSegment::Wildcard => {
+                    matches.matches.push((current_segment?, split));
+                }
+                PatternSegment::DoubleWildcard => {
+                    if let Some(PatternSegment::Static(next_seg)) = segments.peek() {
+                        if next_seg == split {
+                            current_segment = segments.next();
+                            continue;
+                        }
+                        matches.matches.push((current_segment?, split));
+                        continue;
+                    } else {
+                        matches.matches.push((current_segment?, split));
+                    }
+                }
+            };
+            current_segment = segments.next();
+        }
+        Some(matches)
     }
 }
 
+pub enum PatternSegment {
+    Static(String),
+    Capture(String),
+    Wildcard,
+    DoubleWildcard,
+}
+
 pub struct PatternMatches<'a> {
-    matches: Vec<(PatternSegment, &'a str)>,
+    matches: Vec<(&'a PatternSegment, &'a str)>,
 }
 
 impl<'a> PatternMatches<'a> {
+    fn new() -> Self {
+        Self { matches: vec![] }
+    }
+
     fn params(&'a self) -> Params<'a> {
         self.matches
             .iter()
@@ -248,14 +287,6 @@ impl<'a> PatternMatches<'a> {
                 params
             })
     }
-}
-
-pub enum PatternSegment {
-    Static(String),
-    Capture(String),
-    Wildcard,
-    DoubleWildcard,
-    Never,
 }
 
 #[cfg(test)]
