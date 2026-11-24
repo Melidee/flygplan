@@ -27,6 +27,8 @@ macro_rules! router_inner {
     ] $r:ident) => {
         macro_rules! status {
             (400) => { $crate::http::Status::BadRequest400 };
+            (401) => { $crate::http::Status::Unauthorized401 };
+            (403) => { $crate::http::Status::Forbidden403 };
             (404) => { $crate::http::Status::NotFound404 };
             (500) => { $crate::http::Status::InternalServerError500 };
             ($code:tt) => { compile_error!("Unknown HTTP status code.") };
@@ -35,6 +37,14 @@ macro_rules! router_inner {
         $crate::router_inner!([$($rest)*] $r)
     };
 
+    ([
+        group $route:expr => {$($body:tt)*},
+        $($rest:tt)*
+    ] $r:ident) => {
+        $r.group($route, router!($($body)*));
+        $crate::router_inner!([$($rest)*] $r)
+    };
+    
     ([
         $(#[$middleware:expr])*
         $method_end:ident $route:expr => $func:expr,
@@ -63,6 +73,7 @@ macro_rules! router {
 
 pub struct Router {
     routes: Vec<Route>,
+    prefix: String,
     status_handlers: Vec<(Status, Handler)>,
     middlewares: Vec<Arc<Mutex<dyn Middleware>>>,
 }
@@ -71,9 +82,14 @@ impl Router {
     pub fn new() -> Self {
         Self {
             routes: vec![],
+            prefix: "".to_string(),
             status_handlers: vec![],
             middlewares: vec![],
         }
+    }
+
+    fn set_prefix(&mut self, prefix: &str) {
+        self.prefix = prefix.to_owned();
     }
 
     pub fn route<F: Fn(Context) -> Result<Context> + 'static>(
@@ -82,7 +98,20 @@ impl Router {
         pattern: &str,
         handler: F,
     ) -> &mut Route {
-        let route = Route::new(method, pattern, RouteTarget::Handler(Arc::new(handler)));
+        let route = Route::new(
+            method,
+            &format!("{}{}", self.prefix, pattern),
+            RouteTarget::Handler(Arc::new(handler)),
+        );
+        self.routes.push(route);
+        self.routes
+            .last_mut()
+            .expect("the route just pushed is the last element")
+    }
+
+    pub fn group(&mut self, pattern: &str, mut router: Router) -> &mut Route {
+        router.set_prefix(pattern);
+        let route = Route::new(Method::Any, pattern, RouteTarget::Group(router));
         self.routes.push(route);
         self.routes
             .last_mut()
@@ -138,10 +167,6 @@ impl Router {
                 }
                 RouteTarget::Group(group) => {
                     let (handler, params) = group.find_handler(request)?;
-                    let params = params
-                        .pairs()
-                        .iter()
-                        .fold(matches.params(), |params, pair| params.with(*pair));
                     let dressed = Self::dressed_handler(handler, self.middlewares.clone());
                     Some((dressed, params))
                 }

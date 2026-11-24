@@ -86,6 +86,7 @@ impl<'a> Display for Request<'a> {
 pub enum Method {
     Get,
     Post,
+    Any,
 }
 
 impl TryFrom<&str> for Method {
@@ -93,6 +94,7 @@ impl TryFrom<&str> for Method {
         Ok(match value {
             "GET" => Self::Get,
             "POST" => Self::Post,
+            "*" => Self::Any,
             _ => return Err(Error::ParseError(format!("invalid HTTP method {value}"))),
         })
     }
@@ -105,6 +107,7 @@ impl Display for Method {
         let method = match self {
             Method::Get => "GET",
             Method::Post => "POST",
+            Method::Any => "*"
         };
         write!(f, "{}", method)
     }
@@ -150,6 +153,8 @@ pub enum Status {
     Ok200,
     SeeOther303,
     BadRequest400,
+    Unauthorized401,
+    Forbidden403,
     NotFound404,
 }
 
@@ -159,6 +164,8 @@ impl Display for Status {
             Self::Ok200 => "200 OK",
             Self::SeeOther303 => "303 See Other",
             Self::BadRequest400 => "400 Bad Request",
+            Self::Unauthorized401 => "401 Unauthorized",
+            Self::Forbidden403 => "403 Forbidden",
             Self::NotFound404 => "404 NOT FOUND",
         };
         write!(f, "{}", method)
