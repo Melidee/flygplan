@@ -56,12 +56,7 @@ macro_rules! router_inner {
         $method_end:ident $route:expr => $func:expr,
         $($rest:tt)*
     ] $r:ident) => {
-        macro_rules! method {
-            (GET) => { $crate::http::Method::Get };
-            (POST) => { $crate::http::Method::Post };
-            ($ident:ident) => { compile_error!("Unknown HTTP method.") };
-        }
-        let route = $r.route(method!($method_end), $route, $func);
+        let route = $r.route($crate::method!($method_end), $route, $func);
         $(
             route.use_middleware($middleware);
         )*
